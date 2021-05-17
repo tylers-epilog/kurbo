@@ -6,7 +6,7 @@ license = "MIT/Apache-2.0"
 edition = "2018"
 keywords = ["graphics", "curve", "curves", "bezier", "geometry"]
 repository = "https://github.com/linebender/kurbo"
-description = "A 2D curves library"
+description = "2D geometry primatives with a focus on curves."
 readme = "README.md"
 categories = ["graphics"]
 
