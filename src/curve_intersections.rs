@@ -340,11 +340,13 @@ fn point_curve_intersections<T: ParamCurveBezierClipping>(
         return result;
     }
 
-    // The remaining case is if pt is approximately equal to an interior point of curve, but not within
-    // the x-range or y-range of the curve (which we already checked) - for example if curve is a
-    // horizontal line that extends beyond its endpoints, and pt is just outside an end of the line;
-    // or if the curve has a cusp in one of the corners of its convex hull and pt is
-    // diagonally just outside the hull.  This is a rare case (could we even ignore it?).
+    // The remaining case is if pt is approximately equal to an interior point
+    // of curve, but not within the x-range or y-range of the curve (which we
+    // already checked) due to floating point errors - for example if curve is
+    // a horizontal line that extends beyond its endpoints, and pt is on the
+    // extrema, but just barely outside the x-y limits; or if the curve has a
+    // cusp in one of the corners of its convex hull and pt is diagonally just
+    // outside the hull.
     #[inline]
     fn maybe_add<T: ParamCurve + ParamCurveExtrema>(
         t: f64,
@@ -523,11 +525,10 @@ mod tests {
     fn test_t_along_curve<T: ParamCurveBezierClipping>(
         curve: &T,
         t_test: f64,
-        image: &mut Image,
     ) {
         let pt_test = curve.eval(t_test);
         let t_values = point_curve_intersections(pt_test, curve);
-        assert!(t_values.len() >= 1);
+        assert!(!t_values.is_empty());
 
         let mut found_t = false;
         for t in &t_values {
