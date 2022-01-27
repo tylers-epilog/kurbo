@@ -520,22 +520,33 @@ mod tests {
         assert_eq!(arr2.len(), count);
     }
 
-    fn test_t_along_curve(
-        curve: &CubicBez,
-        t: f64
+    fn test_t_along_curve<T: ParamCurveBezierClipping>(
+        curve: &T,
+        t_test: f64,
     ) {
-        let pt = curve.eval(t);
-        let t_values = point_curve_intersections(pt, curve);
-        assert_eq!(t_values.len(), 1);
-        println!("t for pt ({}): {}, expected {}", pt, t_values[0], t);
-        assert!(real_is_equal(t_values[0], t))
+        let pt_test = curve.eval(t_test);
+        let t_values = point_curve_intersections(pt_test, curve);
+        assert!(t_values.len() >= 1);
+
+        for t in &t_values {
+            let pt = curve.eval(*t);
+            println!("t for pt on curve: {} {}, expected {} {}", t, pt, t_test, pt_test);
+            assert!(real_is_equal(*t, t_test))
+        }
+    }
+
+    fn test_t<T: ParamCurveBezierClipping>(
+        curve: &T,
+    ) {
+        let tenths = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0];
+        for &t in tenths.iter() {
+            test_t_along_curve(curve, t);
+        }
     }
 
     #[test]
     fn test_cubic_cubic_intersections() {
-        let curve = CubicBez::new((0.0, 0.0), (0.3, -1.0), (0.7, -1.0), (1.0, 0.0));
-        test_t_along_curve(&curve, 0.0);
-        test_t_along_curve(&curve, 1.0);
+        test_t(&CubicBez::new((0.0, 0.0), (0.3, -1.0), (0.7, -1.0), (1.0, 0.0)));
         
         do_test(
             &CubicBez::new((0.0, 0.0), (0.0, 1.0), (0.0, 1.0), (1.0, 1.0)),
