@@ -287,14 +287,14 @@ fn add_point_curve_intersection<T: ParamCurveBezierClipping, U: ParamCurveBezier
     }
 
     // If sampling didn't work, try a different approach.
-    let results = point_curve_intersections(pt, curve);
+    let results = t_along_curve_for_point(pt, curve);
     for t in results {
         let curve_t = domain_value_at_t(curve_domain, t);
         add_intersection(pt_t, pt_curve, curve_t, curve, flip, intersections);
     }
 }
 
-fn point_curve_intersections<T: ParamCurveBezierClipping>(
+pub fn t_along_curve_for_point<T: ParamCurveBezierClipping>(
     pt: Point,
     curve: &T,
 ) -> ArrayVec<[f64; 9]> {
@@ -527,7 +527,7 @@ mod tests {
         t_test: f64,
     ) {
         let pt_test = curve.eval(t_test);
-        let t_values = point_curve_intersections(pt_test, curve);
+        let t_values = t_along_curve_for_point(pt_test, curve);
         assert!(!t_values.is_empty());
 
         let mut found_t = false;
