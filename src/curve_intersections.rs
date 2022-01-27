@@ -523,16 +523,25 @@ mod tests {
     fn test_t_along_curve<T: ParamCurveBezierClipping>(
         curve: &T,
         t_test: f64,
+        image: &mut Image,
     ) {
         let pt_test = curve.eval(t_test);
         let t_values = point_curve_intersections(pt_test, curve);
         assert!(t_values.len() >= 1);
 
+        let mut found_t = false;
         for t in &t_values {
             let pt = curve.eval(*t);
+
+            if real_is_equal(*t, t_test)
+            {
+                found_t = true;
+            }
+
             println!("t for pt on curve: {} {}, expected {} {}", t, pt, t_test, pt_test);
-            assert!(real_is_equal(*t, t_test))
+            assert!(point_is_equal(pt, pt_test))
         }
+        assert!(found_t)
     }
 
     fn test_t<T: ParamCurveBezierClipping>(
@@ -547,6 +556,7 @@ mod tests {
     #[test]
     fn test_cubic_cubic_intersections() {
         test_t(&CubicBez::new((0.0, 0.0), (0.3, -1.0), (0.7, -1.0), (1.0, 0.0)));
+        test_t(&CubicBez::new((0.0, 0.0), (-1.0, 0.0), (1.0, 0.0), (1.0, 0.0)));
         
         do_test(
             &CubicBez::new((0.0, 0.0), (0.0, 1.0), (0.0, 1.0), (1.0, 1.0)),
