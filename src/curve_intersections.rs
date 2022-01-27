@@ -252,7 +252,7 @@ fn add_point_curve_intersection<T: ParamCurveBezierClipping, U: ParamCurveBezier
     intersections: &mut ArrayVec<[(f64, f64); 9]>,
     flip: bool,
 ) {
-    let pt = pt_curve.start();
+    let pt = pt_curve.eval(0.5);
     // We assume pt is curve1 when we add intersections below.
     let flip = if pt_curve_is_curve1 { flip } else { !flip };
 
@@ -320,7 +320,7 @@ fn point_curve_intersections<T: ParamCurveBezierClipping>(
     for params in [curve_x_t_params, curve_y_t_params].iter() {
         for t in params {
             let t = *t;
-            if point_is_equal(pt, curve.eval(t)) {
+            if !point_is_equal(pt, curve.eval(t)) {
                 continue;
             }
             let mut already_found_t = false;

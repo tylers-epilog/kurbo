@@ -8,7 +8,8 @@ use crate::{Point};
 pub fn epsilon_for_value(num: f64) -> f64 {
     // These values have been obtained experimentally and can be changed if
     // necessary.
-    (num.abs() * 0.0000000001).max(0.00001)
+    // (num.abs() * 0.0000000001).max(0.0000001)
+    (num.abs() * 0.0000000001).max(f64::EPSILON)
 }
 
 /// If we're comparing distances between samples of curves, our epsilon should
