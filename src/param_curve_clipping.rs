@@ -1,6 +1,6 @@
 //! A trait for clipping parametrized curves.
 
-use crate::common::{min_max, solve_cubic, solve_quadratic};
+use crate::common::{min_max, solve_cubic, solve_quadratic, solve_linear};
 use crate::{CubicBez, QuadBez, Line, Point, ParamCurve, ParamCurveBezierClipping};
 use arrayvec::ArrayVec;
 
@@ -11,6 +11,47 @@ fn signed_distance_from_ray_to_point(l: &Line, p: Point) -> f64 {
     let b = vec2.x;
     let c = -(a * l.start().x + b * l.start().y);
     a * p.x + b * p.y + c
+}
+
+impl ParamCurveBezierClipping for Line {
+    fn solve_t_for_x(&self, x: f64) -> ArrayVec<[f64; 3]> {
+        if (self.p0.x - self.p1.x).abs() < f64::EPSILON {
+            return ArrayVec::new();
+        }
+        let (a, b) = self.parameters();
+        solve_linear(b.x - x, a.x)
+            .iter()
+            .copied()
+            .filter(|&t| (0.0..=1.0).contains(&t))
+            .collect()
+    }
+    fn solve_t_for_y(&self, y: f64) -> ArrayVec<[f64; 3]> {
+        if (self.p0.y - self.p1.y).abs() < f64::EPSILON {
+            return ArrayVec::new();
+        }
+
+        let (a, b) = self.parameters();
+        solve_linear(b.y - y, a.y)
+            .iter()
+            .copied()
+            .filter(|&t| (0.0..=1.0).contains(&t))
+            .collect()
+    }
+
+    fn fat_line_min_max(&self) -> (f64, f64) {
+        (0., 0.)
+    }
+
+    fn convex_hull_from_line(&self, l: &Line) -> (Vec<Point>, Vec<Point>) {
+        let d0 = signed_distance_from_ray_to_point(l, self.start());
+        let d1 = signed_distance_from_ray_to_point(l, self.end());
+        
+        let p0 = Point::new(0.0, d0);
+        let p1 = Point::new(1.0, d1);
+
+        // The hull is simply the line itself
+        (vec![p0, p1], vec![p0, p1])
+    }
 }
 
 impl ParamCurveBezierClipping for QuadBez {

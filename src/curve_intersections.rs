@@ -527,8 +527,7 @@ fn rectangles_overlap(r1: &Rect, r2: &Rect) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::CubicBez;
-    use crate::QuadBez;
+    use crate::{CubicBez, QuadBez, Line};
 
     fn do_test<T: ParamCurveBezierClipping, U: ParamCurveBezierClipping>(
         curve1: &T,
