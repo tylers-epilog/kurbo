@@ -562,6 +562,36 @@ mod tests {
             &CubicBez::new((0.0, 0.0), (2.5, 0.5), (-1.5, 0.5), (1.0, 0.0)),
             9,
         );
+        do_test(
+            &QuadBez::new((0.0, 0.0), (0.5, 1.0), (1.0, 0.0)),
+            &CubicBez::new((0.2, 0.0), (0.5, 3.0), (0.5, -2.0), (0.8, 1.0)),
+            3,
+        );
+        do_test(
+            &QuadBez::new((0.0, 0.0), (0.5, 1.0), (1.0, 0.0)),
+            &QuadBez::new((0.0, 0.25), (0.5, 0.75), (1.0, 0.25)),
+            1,
+        );
+        do_test(
+            &QuadBez::new((0.0, 0.0), (0.5, 1.0), (1.0, 0.0)),
+            &QuadBez::new((0.0, 0.25), (0.5, -0.25), (1.0, 0.25)),
+            2,
+        );
+        do_test(
+            &QuadBez::new((0.0, 0.0), (0.5, 1.0), (1.0, 0.0)),
+            &Line::new((0.0, 0.5), (1.0, 0.25)),
+            2,
+        );
+        do_test(
+            &QuadBez::new((0.0, 0.0), (0.5, 1.0), (1.0, 0.0)),
+            &Line::new((0.0, 0.5), (1.0, 0.5)),
+            1,
+        );
+        do_test(
+            &CubicBez::new((0.2, 0.0), (0.5, 3.0), (0.5, -2.0), (0.8, 1.0)),
+            &Line::new((0.0, 0.5), (1.0, 0.25)),
+            3,
+        );
 
         // (A previous version of the code was returning two practically identical
         // intersection points here.)
