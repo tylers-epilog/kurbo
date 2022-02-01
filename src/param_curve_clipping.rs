@@ -1,7 +1,7 @@
 //! A trait for clipping parametrized curves.
 
 use crate::common::{min_max, solve_cubic, solve_quadratic, solve_linear};
-use crate::{CubicBez, QuadBez, Line, Point, ParamCurve, ParamCurveBezierClipping};
+use crate::{CubicBez, QuadBez, Line, Point, ParamCurve, ParamCurveBezierClipping, real::*};
 use arrayvec::ArrayVec;
 
 // Note that the line is unbounded here!
@@ -15,7 +15,7 @@ fn signed_distance_from_ray_to_point(l: &Line, p: Point) -> f64 {
 
 impl ParamCurveBezierClipping for Line {
     fn solve_t_for_x(&self, x: f64) -> ArrayVec<[f64; 3]> {
-        if (self.p0.x - self.p1.x).abs() < f64::EPSILON {
+        if real_is_equal(self.p0.x, self.p1.x) {
             return ArrayVec::new();
         }
         let (a, b) = self.parameters();
@@ -26,7 +26,7 @@ impl ParamCurveBezierClipping for Line {
             .collect()
     }
     fn solve_t_for_y(&self, y: f64) -> ArrayVec<[f64; 3]> {
-        if (self.p0.y - self.p1.y).abs() < f64::EPSILON {
+        if real_is_equal(self.p0.y, self.p1.y) {
             return ArrayVec::new();
         }
 
@@ -56,7 +56,7 @@ impl ParamCurveBezierClipping for Line {
 
 impl ParamCurveBezierClipping for QuadBez {
     fn solve_t_for_x(&self, x: f64) -> ArrayVec<[f64; 3]> {
-        if self.is_linear(f64::EPSILON) && (self.p0.x - self.p2.x).abs() < f64::EPSILON {
+        if self.is_linear(f64::EPSILON) && real_is_equal(self.p0.x, self.p2.x) {
             return ArrayVec::new();
         }
         let (a, b, c) = self.parameters();
@@ -67,7 +67,7 @@ impl ParamCurveBezierClipping for QuadBez {
             .collect()
     }
     fn solve_t_for_y(&self, y: f64) -> ArrayVec<[f64; 3]> {
-        if self.is_linear(f64::EPSILON) && (self.p0.y - self.p2.y).abs() < f64::EPSILON {
+        if self.is_linear(f64::EPSILON) && real_is_equal(self.p0.y, self.p2.y) {
             return ArrayVec::new();
         }
 
@@ -115,7 +115,7 @@ impl ParamCurveBezierClipping for QuadBez {
 
 impl ParamCurveBezierClipping for CubicBez {
     fn solve_t_for_x(&self, x: f64) -> ArrayVec<[f64; 3]> {
-        if self.is_linear(f64::EPSILON) && (self.p0.x - self.p3.x).abs() < f64::EPSILON {
+        if self.is_linear(f64::EPSILON) && real_is_equal(self.p0.x, self.p3.x) {
             return ArrayVec::new();
         }
         let (a, b, c, d) = self.parameters();
@@ -126,7 +126,7 @@ impl ParamCurveBezierClipping for CubicBez {
             .collect()
     }
     fn solve_t_for_y(&self, y: f64) -> ArrayVec<[f64; 3]> {
-        if self.is_linear(f64::EPSILON) && (self.p0.y - self.p3.y).abs() < f64::EPSILON {
+        if self.is_linear(f64::EPSILON) && real_is_equal(self.p0.y, self.p3.y) {
             return ArrayVec::new();
         }
 
