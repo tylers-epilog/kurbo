@@ -7,9 +7,9 @@ use std::ops::Range;
 
 bitflags::bitflags! {
     pub struct CurveIntersectionFlags: u32 {
-        const NONE                              = 0b00000000;
+        const NONE                           = 0b00000000;
         const KEEP_ENDPOINT_INTERSECTIONS    = 0b00000001;
-        const KEEP_DUPLICATE_INTERSECTIONS      = 0b00000010;
+        const KEEP_DUPLICATE_INTERSECTIONS   = 0b00000010;
     }
 }
 
@@ -20,6 +20,12 @@ pub fn curve_curve_intersections<T: ParamCurveBezierClipping, U: ParamCurveBezie
     flags: CurveIntersectionFlags,
 ) -> ArrayVec<[(f64, f64); 9]> {
     let mut av = ArrayVec::new();
+
+    let overlaps = check_for_overlap(curve1, curve2, flags, &mut av);
+    if overlaps {
+        return av;
+    }
+
     add_curve_intersections(
         curve1,
         curve2,
@@ -34,6 +40,124 @@ pub fn curve_curve_intersections<T: ParamCurveBezierClipping, U: ParamCurveBezie
         flags,
     );
     av
+}
+
+/// This function tests if one curve lies along another curve for some range
+fn check_for_overlap<T: ParamCurveBezierClipping, U: ParamCurveBezierClipping>(
+    curve1: &T,
+    curve2: &U,
+    flags: CurveIntersectionFlags,
+    intersections: &mut ArrayVec<[(f64, f64); 9]>,
+) -> bool {
+    // If the two curves overlap, there are two main cases we need to account for:
+    //   1) One curve is completely along some portion of the other curve, thus
+    //      both endpoints of the first curve lie along the other curve.
+    //      ex. curve 1: O------------------O
+    //          curve 2:    O---O
+    //   2) The two curves overlap, thus one endpoint from each curve lies
+    //      along the other.
+    //      ex. curve 1: O------------------O
+    //          curve 2:               O-----------O
+
+    // Use this function to get the t-value on another curve that corresponds to the t-value on this curve
+    #[inline]
+    fn t_value_on_other<T: ParamCurveBezierClipping, U: ParamCurveBezierClipping>(
+        t_this: f64,
+        curve_this: &T,
+        curve_other: &U,
+    ) -> (bool, f64) {
+        let t_values_other = point_is_on_curve(curve_this.eval(t_this), curve_other);
+        if !t_values_other.0 {
+            return (false, 0.0);
+        }
+
+        assert!(t_values_other.1.len() >= 1); // This has to be true or we really messed up!
+        if t_values_other.1.len() == 1 {
+            return (true, t_values_other.1[0])
+        }
+
+        // Things get kind of complicated if we have more than one t value
+        // here. The best solution I can think of is to compare the derivatives
+        // at each point.
+        let curve_deriv_at_t_this = curve_this.deriv().eval(t_this);
+        let curve_deriv_other = curve_other.deriv();
+
+        // Find the t-value with the closest derivative
+        let mut deriv = Point::new(f64::MAX, f64::MAX);
+        let mut index = 0;
+        for (i, t) in t_values_other.1.iter().enumerate()  {
+            let curve_deriv_at_t_other = curve_deriv_other.eval(*t);
+            let d = (curve_deriv_at_t_other - deriv).hypot2();
+            let d_compare = (curve_deriv_at_t_this - deriv).hypot2();
+            if d < d_compare {
+                deriv = curve_deriv_at_t_other;
+                index = i;
+            }
+        }
+        (true, t_values_other.1[index])
+    }
+
+    // First, test which endpoints, if any lie along the other curve
+    let start1_on_2 = t_value_on_other(0., curve1, curve2);
+    let end1_on_2 = t_value_on_other(1., curve1, curve2);
+    let start2_on_1 = t_value_on_other(0., curve2, curve1);
+    let end2_on_1 = t_value_on_other(1., curve2, curve1);
+
+    // At least 2 endpoints must lie on the other curve for us to proceed
+    let count = if start1_on_2.0 { 1 } else { 0 } + 
+                if end1_on_2.  0 { 1 } else { 0 } + 
+                if start2_on_1.0 { 1 } else { 0 } + 
+                if end2_on_1.0   { 1 } else { 0 };
+    if count < 2 {
+        return false; // No overlap
+    }
+
+    // Check a few intermediate points to make sure that it's not just the
+    // endpoints that lie on top of the other curve. I'll make the claim that
+    // two curves can intersect at 4 points, but not be co-linear (or co-curved?).
+    // This could happen if two bezier with the same start and end point, one
+    // curved and one looped, intersected where the second curve intersects itself.
+    // Therefore, it's safe if we check 5 positions in total. Since we've already
+    // checked the endpoints, we just need to check 3 intermediate positions.
+
+    fn get_projection(t_value: (bool, f64), default_value: f64) -> f64 {
+        if t_value.0 { t_value.1 } else { default_value }
+    }
+
+    // Determine the range of curve1 that lies along curve2
+    let overlap_along_curve1 = (
+        if start1_on_2.0 { 0. } else { (get_projection(start2_on_1, 1.)).min(get_projection(end2_on_1, 1.)) },
+        if end1_on_2.0   { 1. } else { (get_projection(start2_on_1, 0.)).max(get_projection(end2_on_1, 0.)) },
+    );
+    assert!(overlap_along_curve1.0 <= overlap_along_curve1.1);
+
+    // Determine the range of curve2 that lies along curve1 such that
+    // overlap_along_curve2.0 corresponds to the same position in space as
+    // overlap_along_curve1.0.
+    // Note: It's not guaranteed that overlap_along_curve2.0 < overlap_along_curve2.1
+    let overlap_along_curve2 = (
+        if start1_on_2.0 { start1_on_2.1 }
+        else { let p1 = get_projection(start2_on_1, 1.); let p2 = get_projection(end2_on_1, 1.); if p1 < p2 { 0. } else { 1. } },
+        if end1_on_2.0 { end1_on_2.1 }
+        else { let p1 = get_projection(start2_on_1, 0.); let p2 = get_projection(end2_on_1, 0.); if p1 < p2 { 1. } else { 0. } },
+    );
+
+    // Check the 3 intermediate locations
+    let interval1 = (overlap_along_curve1.1 - overlap_along_curve1.0) / 4.;
+    let interval2 = (overlap_along_curve2.1 - overlap_along_curve2.0) / 4.;
+    for n in 1..3 {
+        if !point_is_equal(curve1.eval(overlap_along_curve1.0 + (n as f64) * interval1), curve2.eval(overlap_along_curve2.0 + (n as f64) * interval2)) {
+            return false;
+        }
+    }
+
+    if flags.contains(CurveIntersectionFlags::KEEP_ENDPOINT_INTERSECTIONS) {
+        // Add the endpoints as intersections
+        intersections.push((overlap_along_curve1.0, overlap_along_curve2.0));
+        intersections.push((overlap_along_curve1.1, overlap_along_curve2.1));
+    }
+
+    true // The two curves overlap!
 }
 
 // This function implements the main bézier clipping algorithm by recursively subdividing curve1 and
@@ -319,7 +443,7 @@ fn add_point_curve_intersection<T: ParamCurveBezierClipping, U: ParamCurveBezier
 pub fn t_along_curve_for_point<T: ParamCurveBezierClipping>(
     pt: Point,
     curve: &T,
-) -> ArrayVec<[f64; 9]> {
+) -> ArrayVec<[f64; 2]> {
     let mut result = ArrayVec::new();
 
     // If both endpoints are approximately close, we only return 0.0.
@@ -374,7 +498,7 @@ pub fn t_along_curve_for_point<T: ParamCurveBezierClipping>(
         t: f64,
         pt: Point,
         curve: &T,
-        result: &mut ArrayVec<[f64; 9]>,
+        result: &mut ArrayVec<[f64; 2]>,
     ) -> bool {
         if point_is_equal(curve.eval(t), pt) {
             result.push(t);
@@ -388,6 +512,19 @@ pub fn t_along_curve_for_point<T: ParamCurveBezierClipping>(
     }
 
     result
+}
+
+fn point_is_on_curve<T: ParamCurveBezierClipping>(
+    pt: Point,
+    curve: &T,
+) -> (bool, ArrayVec<[f64; 2]>) {
+    let t_values = t_along_curve_for_point(pt, curve);
+    for t in &t_values {
+        if point_is_equal(pt, curve.eval(*t)) {
+            return (true, t_values.clone()); // Point lies along curve
+        }
+    }
+    (false, t_values.clone()) // Point is not along curve
 }
 
 fn add_intersection<T: ParamCurveBezierClipping, U: ParamCurveBezierClipping>(
@@ -586,6 +723,39 @@ mod tests {
         }
     }
 
+    fn test_overlapping<T: ParamCurveBezierClipping>(
+        curve: &T,
+        t1: f64,
+        t2: f64,
+    ) {
+        assert!(t1 < t2);
+
+        do_test(
+            &curve.subsegment(0.0..t2),
+            &curve.subsegment(t1..1.0),
+            2,
+            CurveIntersectionFlags::KEEP_ENDPOINT_INTERSECTIONS, // Include endpoint intersections
+        );
+        do_test(
+            &curve.subsegment(0.0..t2),
+            &curve.subsegment(1.0..t1),
+            2,
+            CurveIntersectionFlags::KEEP_ENDPOINT_INTERSECTIONS, // Include endpoint intersections
+        );
+        do_test(
+            &curve.subsegment(0.0..1.0),
+            &curve.subsegment(t1..t2),
+            2,
+            CurveIntersectionFlags::KEEP_ENDPOINT_INTERSECTIONS, // Include endpoint intersections
+        );
+        do_test(
+            &curve.subsegment(0.0..1.0),
+            &curve.subsegment(t2..t1),
+            2,
+            CurveIntersectionFlags::KEEP_ENDPOINT_INTERSECTIONS, // Include endpoint intersections
+        );
+    }
+
     #[test]
     fn test_cubic_cubic_intersections() {
         test_t(&CubicBez::new((0.0, 0.0), (0.3, -1.0), (0.7, -1.0), (1.0, 0.0)));
@@ -655,9 +825,15 @@ mod tests {
         // These tests intersect at the endpoints which is only sometimes useful to know about.
         do_test(
             &CubicBez::new((0.0, 0.0), (0.3, -1.0), (0.7, -1.0), (1.0, 0.0)),
-            &CubicBez::new((0.0, 0.0), (0.3, -1.0), (0.7, -1.0), (1.0, 0.0)),
+            &CubicBez::new((1.0, 0.0), (0.7, -1.0), (0.3, -1.0), (0.0, 0.0)),
             2,
             CurveIntersectionFlags::KEEP_ENDPOINT_INTERSECTIONS, // Include endpoint intersections
+        );
+        do_test(
+            &CubicBez::new((0.0, 0.0), (0.3, -1.0), (0.7, -1.0), (1.0, 0.0)),
+            &CubicBez::new((1.0, 0.0), (0.7, -1.0), (0.3, -1.0), (0.0, 0.0)),
+            0,
+            CurveIntersectionFlags::NONE, // Discard endpoint intersections
         );
         do_test(
             &CubicBez::new((0.0, 0.0), (0.3, -1.0), (0.7, -1.0), (1.0, 0.0)),
@@ -665,6 +841,15 @@ mod tests {
             2,
             CurveIntersectionFlags::KEEP_ENDPOINT_INTERSECTIONS, // Include endpoint intersections
         );
+        do_test(
+            &CubicBez::new((0.0, 0.0), (0.3, -1.0), (0.7, -1.0), (1.0, 0.0)),
+            &CubicBez::new((0.0, 0.0), (0.3, -0.5), (0.7, -0.5), (1.0, 0.0)),
+            0,
+            CurveIntersectionFlags::NONE, // Discard endpoint intersections
+        );
+
+        // Test curves that lie exactly along one-another
+        test_overlapping(&CubicBez::new((0.0, 0.0), (0.3, -1.0), (0.7, -1.0), (1.0, 0.0)), 0.2, 0.8);
 
         // (A previous version of the code was returning two practically identical
         // intersection points here.)
