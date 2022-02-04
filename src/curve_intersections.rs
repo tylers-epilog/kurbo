@@ -466,12 +466,15 @@ pub fn t_along_curve_for_point<T: ParamCurveBezierClipping>(
     for params in [curve_x_t_params, curve_y_t_params].iter() {
         for t in params {
             let t = *t;
-            if !point_is_equal(pt, curve.eval(t)) {
+
+            // Note: use point_is_approx below for a little more wiggle room
+            // since our root finding algorithm is perfect
+            if !point_is_approx(pt, curve.eval(t), 2.) { 
                 continue;
             }
             let mut already_found_t = false;
             for u in &result {
-                if f64::abs(t - *u) < param_eps {
+                if real_is_equal(t, *u) {
                     already_found_t = true;
                     break;
                 }
