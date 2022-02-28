@@ -155,7 +155,11 @@ impl ParamCurveCurvature for Line {
 
 impl ParamCurveExtrema for Line {
     #[inline]
-    fn extrema(&self) -> ArrayVec<f64, MAX_EXTREMA> {
+    fn extrema_x(&self) -> ArrayVec<f64, MAX_EXTREMA> {
+        ArrayVec::new()
+    }
+    #[inline]
+    fn extrema_y(&self) -> ArrayVec<f64, MAX_EXTREMA> {
         ArrayVec::new()
     }
 }

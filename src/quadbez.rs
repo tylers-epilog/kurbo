@@ -365,7 +365,7 @@ impl ParamCurveNearest for QuadBez {
 impl ParamCurveCurvature for QuadBez {}
 
 impl ParamCurveExtrema for QuadBez {
-    fn extrema(&self) -> ArrayVec<f64, MAX_EXTREMA> {
+    fn extrema_x(&self) -> ArrayVec<f64, MAX_EXTREMA> {
         let mut result = ArrayVec::new();
         let d0 = self.p1 - self.p0;
         let d1 = self.p2 - self.p1;
@@ -376,13 +376,18 @@ impl ParamCurveExtrema for QuadBez {
                 result.push(t);
             }
         }
+        result
+    }
+
+    fn extrema_y(&self) -> ArrayVec<f64, MAX_EXTREMA> {
+        let mut result = ArrayVec::new();
+        let d0 = self.p1 - self.p0;
+        let d1 = self.p2 - self.p1;
+        let dd = d1 - d0;
         if dd.y != 0.0 {
             let t = -d0.y / dd.y;
             if t > 0.0 && t < 1.0 {
                 result.push(t);
-                if result.len() == 2 && result[0] > t {
-                    result.swap(0, 1);
-                }
             }
         }
         result

@@ -793,11 +793,19 @@ impl ParamCurveNearest for PathSeg {
 }
 
 impl ParamCurveExtrema for PathSeg {
-    fn extrema(&self) -> ArrayVec<f64, MAX_EXTREMA> {
+    fn extrema_x(&self) -> ArrayVec<f64, MAX_EXTREMA> {
         match *self {
-            PathSeg::Line(line) => line.extrema(),
-            PathSeg::Quad(quad) => quad.extrema(),
-            PathSeg::Cubic(cubic) => cubic.extrema(),
+            PathSeg::Line(line) => line.extrema_x(),
+            PathSeg::Quad(quad) => quad.extrema_x(),
+            PathSeg::Cubic(cubic) => cubic.extrema_x(),
+        }
+    }
+
+    fn extrema_y(&self) -> ArrayVec<f64, MAX_EXTREMA> {
+        match *self {
+            PathSeg::Line(line) => line.extrema_y(),
+            PathSeg::Quad(quad) => quad.extrema_y(),
+            PathSeg::Cubic(cubic) => cubic.extrema_y(),
         }
     }
 }

@@ -205,14 +205,26 @@ pub const MAX_EXTREMA: usize = 4;
 
 /// A parametrized curve that reports its extrema.
 pub trait ParamCurveExtrema: ParamCurve {
-    /// Compute the extrema of the curve.
+    /// Only the x extrema
+    fn extrema_x(&self) -> ArrayVec<f64, MAX_EXTREMA>;
+
+    /// Only the y extrema
+    fn extrema_y(&self) -> ArrayVec<f64, MAX_EXTREMA>;
+
+    /// Compute the x and y extrema of the curve.
     ///
     /// Only extrema within the interior of the curve count.
     /// At most four extrema can be reported, which is sufficient for
     /// cubic Béziers.
     ///
     /// The extrema should be reported in increasing parameter order.
-    fn extrema(&self) -> ArrayVec<f64, MAX_EXTREMA>;
+    fn extrema(&self) -> ArrayVec<f64, MAX_EXTREMA> {
+        let mut result = ArrayVec::new();
+        result.extend(self.extrema_x());
+        result.extend(self.extrema_y());
+        result.sort_by(|a: &f64, b: &f64| a.partial_cmp(b).unwrap());
+        result
+    }
 
     /// Return parameter ranges, each of which is monotonic within the range.
     fn extrema_ranges(&self) -> ArrayVec<Range<f64>, { MAX_EXTREMA + 1 }> {
