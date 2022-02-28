@@ -81,6 +81,7 @@
 mod affine;
 mod arc;
 mod bezpath;
+mod pathops;
 mod circle;
 pub mod common;
 mod cubicbez;
@@ -105,6 +106,7 @@ mod vec2;
 pub use crate::affine::*;
 pub use crate::arc::*;
 pub use crate::bezpath::*;
+pub use crate::pathops::*;
 pub use crate::circle::*;
 pub use crate::cubicbez::*;
 pub use crate::curve_intersections::curve_curve_intersections;
