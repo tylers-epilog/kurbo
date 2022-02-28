@@ -374,17 +374,28 @@ impl BezPath {
     }
 
     /// Splits the path into multiple paths wherever a move-to happens
-    pub fn split_at_moves(&self) -> Vec::<BezPath> {
+    pub fn split_at_moves(&self) -> Vec<BezPath> {
         if self.0.is_empty() {
             return Vec::<BezPath>::new(); // empty path
         }
-        
+
         // Split by move_tos
-        self.0.iter()
+        self.0
+            .iter()
             .skip(1) // Skip first element since it's always treated as a move-to
-            .enumerate().filter(|el| match el.1 { PathEl::MoveTo(_) => true, _ => false }).map(|(i, _)| i + 1) // Get index of each move-to
+            .enumerate() // Get index of each move-to
+            .filter(|el| match el.1 {
+                PathEl::MoveTo(_) => true,
+                _ => false,
+            })
+            .map(|(i, _)| i + 1)
             .chain(vec![self.0.len()].into_iter()) // Append the size of the element list
-            .scan(0, |start, end| { let res = (*start, end); *start = end; Some(res) }) // Get start/end index pairs
+            .scan(0, |start, end| {
+                // Get start/end index pairs
+                let res = (*start, end);
+                *start = end;
+                Some(res)
+            })
             .filter(|(start, end)| (end - start) > 1) // Don't include duplicate move-tos
             .map(|(start, end)| BezPath::from_vec(self.0[start..end].to_vec())) // Create new paths based on start/end bounds
             .collect::<Vec<_>>()
@@ -735,6 +746,11 @@ impl ParamCurve for PathSeg {
             PathSeg::Quad(quad) => PathSeg::Quad(quad.subsegment(range)),
             PathSeg::Cubic(cubic) => PathSeg::Cubic(cubic.subsegment(range)),
         }
+    }
+
+    // #[inline]
+    fn get_affine_transformed(&self, affine: &Affine) -> Self {
+        *affine * *self
     }
 }
 
@@ -1331,19 +1347,19 @@ mod tests {
     #[test]
     fn test_split_at_moves() {
         let mut path = BezPath::new();
-        path.move_to((0.0,  0.0));
+        path.move_to((0.0, 0.0));
         path.line_to((10.0, 0.0));
-        path.move_to((0.0,  1.0));
+        path.move_to((0.0, 1.0));
         path.line_to((10.0, 1.0));
         path.line_to((20.0, 1.0));
-        path.move_to((0.0,  2.0));
-        path.move_to((0.0,  3.0));
+        path.move_to((0.0, 2.0));
+        path.move_to((0.0, 3.0));
         path.line_to((10.0, 3.0));
         path.line_to((20.0, 3.0));
         path.line_to((30.0, 3.0));
 
         let path_list = path.split_at_moves();
-      
+
         assert_eq!(path_list.len(), 3);
         assert_eq!(path_list[0].0.len(), 2);
         assert_eq!(path_list[1].0.len(), 3);

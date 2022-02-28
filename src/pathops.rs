@@ -1,6 +1,5 @@
 /// Boolean operations on BezPaths
-
-use crate::{BezPath};
+use crate::BezPath;
 
 /// An operation that can be performed on a path
 #[derive(Clone, Debug, PartialEq)]
@@ -36,10 +35,7 @@ bitflags::bitflags! {
 }
 
 /// Compute an operation between two paths
-pub fn path_path_operation(
-    path_a: &BezPath,
-    operation: PathOperation,
-) -> BezPath {
+pub fn path_path_operation(path_a: &BezPath, operation: PathOperation) -> BezPath {
     match operation {
         PathOperation::Subtract(path_b) => {
             // Subtract b from a
@@ -47,8 +43,8 @@ pub fn path_path_operation(
                 path_a,
                 path_b,
                 ClosedPathOperationsFlags::KEEP_A_OUTSIDE_B
-                | ClosedPathOperationsFlags::KEEP_B_INSIDE_A,
-                true
+                    | ClosedPathOperationsFlags::KEEP_B_INSIDE_A,
+                true,
             )
         }
         PathOperation::Outside(path_b) => {
@@ -57,7 +53,7 @@ pub fn path_path_operation(
                 path_a,
                 path_b,
                 ClosedPathOperationsFlags::KEEP_A_OUTSIDE_B,
-                false
+                false,
             )
         }
         PathOperation::Intersect(path_b) => {
@@ -66,8 +62,8 @@ pub fn path_path_operation(
                 path_a,
                 path_b,
                 ClosedPathOperationsFlags::KEEP_A_INSIDE_B
-                | ClosedPathOperationsFlags::KEEP_B_INSIDE_A,
-                true
+                    | ClosedPathOperationsFlags::KEEP_B_INSIDE_A,
+                true,
             )
         }
         PathOperation::Inside(path_b) => {
@@ -76,7 +72,7 @@ pub fn path_path_operation(
                 path_a,
                 path_b,
                 ClosedPathOperationsFlags::KEEP_A_INSIDE_B,
-                false
+                false,
             )
         }
         PathOperation::UniteWith(path_b) => {
@@ -85,8 +81,8 @@ pub fn path_path_operation(
                 path_a,
                 path_b,
                 ClosedPathOperationsFlags::KEEP_A_OUTSIDE_B
-                | ClosedPathOperationsFlags::KEEP_B_OUTSIDE_A,
-                true
+                    | ClosedPathOperationsFlags::KEEP_B_OUTSIDE_A,
+                true,
             )
         }
         PathOperation::Xor(path_b) => {
@@ -105,9 +101,7 @@ pub fn path_path_operation(
 /// Note: Since there is no winding fill property of path, the path is assumed
 /// to have a winding fill when this function is called
 /// Note: Open paths are closed
-pub fn convert_path_to_even_odd(
-    path: &BezPath
-) -> BezPath {
+pub fn convert_path_to_even_odd(path: &BezPath) -> BezPath {
     // @TODO DO THIS
     // @TODO CLOSE OPEN PATHS
     path.clone() // TEMPORARY CODE
@@ -129,7 +123,7 @@ fn do_path_op(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Shape, Circle, Point};
+    use crate::{Circle, Point, Shape};
 
     #[test]
     fn test_circle_unite_circle() {

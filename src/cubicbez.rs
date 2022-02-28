@@ -421,6 +421,11 @@ impl ParamCurve for CubicBez {
     fn end(&self) -> Point {
         self.p3
     }
+
+    #[inline]
+    fn get_affine_transformed(&self, affine: &Affine) -> Self {
+        *affine * *self
+    }
 }
 
 impl ParamCurveDeriv for CubicBez {
@@ -884,5 +889,18 @@ mod tests {
         assert!(
             converted[0].points()[2].distance(Point::new(88639.0 / 90.0, 52584.0 / 90.0)) < 0.0001
         );
+    }
+
+    #[test]
+    fn test_uv_transform() {
+        let curve = CubicBez::new(
+            (550.0, 258.0),
+            (1044.0, 482.0),
+            (2029.0, 1841.0),
+            (1934.0, 1554.0),
+        );
+        let curve_uv = curve.transform_to_uv();
+        assert!(Point::is_near(curve_uv.start(), Point::new(0., 0.), 0.));
+        assert!(Point::is_near(curve_uv.end(), Point::new(1., 0.), 0.));
     }
 }

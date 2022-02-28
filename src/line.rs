@@ -93,6 +93,11 @@ impl ParamCurve for Line {
     fn end(&self) -> Point {
         self.p1
     }
+
+    #[inline]
+    fn get_affine_transformed(&self, affine: &Affine) -> Self {
+        *affine * *self
+    }
 }
 
 impl ParamCurveDeriv for Line {
@@ -185,6 +190,18 @@ impl ParamCurve for ConstPoint {
     fn subsegment(&self, _range: Range<f64>) -> ConstPoint {
         *self
     }
+
+    #[inline]
+    fn get_affine_transformed(&self, affine: &Affine) -> Self {
+        *affine * *self
+    }
+
+    /// The default implimentation will fail since start and end are the same
+    fn transform_to_uv(self) -> Self {
+        let s = self.start();
+
+        self.get_affine_transformed(&(Affine::translate(-s.to_vec2())))
+    }
 }
 
 impl ParamCurveDeriv for ConstPoint {
@@ -217,6 +234,15 @@ impl Mul<Line> for Affine {
             p0: self * other.p0,
             p1: self * other.p1,
         }
+    }
+}
+
+impl Mul<ConstPoint> for Affine {
+    type Output = ConstPoint;
+
+    #[inline]
+    fn mul(self, other: ConstPoint) -> ConstPoint {
+        ConstPoint(self * other.0)
     }
 }
 
@@ -297,7 +323,7 @@ impl Iterator for LinePathIter {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Line, ParamCurveArclen};
+    use crate::{Line, ParamCurve, ParamCurveArclen, Point};
 
     #[test]
     fn line_arclen() {
@@ -308,5 +334,13 @@ mod tests {
 
         let t = l.inv_arclen(true_len / 3.0, epsilon);
         assert!((t - 1.0 / 3.0).abs() < epsilon);
+    }
+
+    #[test]
+    fn test_uv_transform_line() {
+        let line = Line::new((550.0, 258.0), (1934.0, 1554.0));
+        let line_uv = line.transform_to_uv();
+        assert!(Point::is_near(line_uv.start(), Point::new(0., 0.), 0.));
+        assert!(Point::is_near(line_uv.end(), Point::new(1., 0.), 0.));
     }
 }

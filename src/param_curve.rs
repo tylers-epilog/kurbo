@@ -1,6 +1,6 @@
 //! A trait for curves parametrized by a scalar.
 
-use crate::Line;
+use crate::{Affine, Line};
 use std::ops::Range;
 
 use arrayvec::ArrayVec;
@@ -45,6 +45,22 @@ pub trait ParamCurve: Sized {
     /// Returns a line from the curve's start point to its end point
     fn baseline(&self) -> Line {
         Line::new(self.start(), self.end())
+    }
+
+    /// Transforms self using an affine trasnform
+    fn get_affine_transformed(&self, affine: &Affine) -> Self;
+
+    /// Transform into a u/v cordinate system such that start = (0, 0) and
+    /// end = (1, 0) defined by points in (u, v) orthoginal coordinate space.
+    fn transform_to_uv(self) -> Self {
+        let s = self.start();
+        let e = self.end();
+
+        self.get_affine_transformed(
+            &(Affine::scale(1. / (e - s).hypot())
+                * Affine::rotate(-(e.y - s.y).atan2(e.x - s.x))
+                * Affine::translate(-s.to_vec2())),
+        )
     }
 }
 

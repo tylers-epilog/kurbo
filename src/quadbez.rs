@@ -226,6 +226,11 @@ impl ParamCurve for QuadBez {
     fn end(&self) -> Point {
         self.p2
     }
+
+    #[inline]
+    fn get_affine_transformed(&self, affine: &Affine) -> Self {
+        *affine * *self
+    }
 }
 
 impl ParamCurveDeriv for QuadBez {
@@ -546,5 +551,13 @@ mod tests {
         assert_eq!(extrema.len(), 2);
         assert!((extrema[0] - 1.0 / 3.0).abs() < 1e-6);
         assert!((extrema[1] - 2.0 / 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_uv_transform() {
+        let curve = QuadBez::new((550.0, 258.0), (1044.0, 482.0), (1934.0, 1554.0));
+        let curve_uv = curve.transform_to_uv();
+        assert!(Point::is_near(curve_uv.start(), Point::new(0., 0.), 0.));
+        assert!(Point::is_near(curve_uv.end(), Point::new(1., 0.), 0.));
     }
 }
