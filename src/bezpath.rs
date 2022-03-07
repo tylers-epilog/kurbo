@@ -11,8 +11,9 @@ use arrayvec::ArrayVec;
 use crate::common::{solve_cubic, solve_quadratic};
 use crate::MAX_EXTREMA;
 use crate::{
-    Affine, CubicBez, Line, Nearest, ParamCurve, ParamCurveArclen, ParamCurveArea,
-    ParamCurveExtrema, ParamCurveNearest, Point, QuadBez, Rect, Shape, TranslateScale, Vec2,
+    Affine, ConstPoint, CubicBez, Line, Nearest, ParamCurve, ParamCurveArclen, ParamCurveArea,
+    ParamCurveDeriv, ParamCurveExtrema, ParamCurveNearest, Point, QuadBez, Rect, Shape,
+    TranslateScale, Vec2,
 };
 
 /// A Bézier path.
@@ -128,6 +129,18 @@ pub enum PathSeg {
     Quad(QuadBez),
     /// A cubic bezier segment.
     Cubic(CubicBez),
+}
+
+/// The derivative of a segment of a Bézier path.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum PathSegDeriv {
+    /// A point
+    Point(ConstPoint),
+    /// A line segment.
+    Line(Line),
+    /// A quadratic bezier segment.
+    Quad(QuadBez),
 }
 
 /// An intersection of a [`Line`] and a [`PathSeg`].
@@ -570,6 +583,18 @@ impl Mul<PathSeg> for Affine {
     }
 }
 
+impl Mul<PathSegDeriv> for Affine {
+    type Output = PathSegDeriv;
+
+    fn mul(self, other: PathSegDeriv) -> PathSegDeriv {
+        match other {
+            PathSegDeriv::Point(point) => PathSegDeriv::Point(self * point),
+            PathSegDeriv::Line(line) => PathSegDeriv::Line(self * line),
+            PathSegDeriv::Quad(quad) => PathSegDeriv::Quad(self * quad),
+        }
+    }
+}
+
 impl Mul<BezPath> for Affine {
     type Output = BezPath;
 
@@ -751,6 +776,41 @@ impl ParamCurve for PathSeg {
     // #[inline]
     fn get_affine_transformed(&self, affine: &Affine) -> Self {
         *affine * *self
+    }
+}
+
+impl ParamCurve for PathSegDeriv {
+    fn eval(&self, t: f64) -> Point {
+        match *self {
+            PathSegDeriv::Point(point) => point.eval(t),
+            PathSegDeriv::Line(line) => line.eval(t),
+            PathSegDeriv::Quad(quad) => quad.eval(t),
+        }
+    }
+
+    fn subsegment(&self, range: Range<f64>) -> PathSegDeriv {
+        match *self {
+            PathSegDeriv::Point(point) => PathSegDeriv::Point(point.subsegment(range)),
+            PathSegDeriv::Line(line) => PathSegDeriv::Line(line.subsegment(range)),
+            PathSegDeriv::Quad(quad) => PathSegDeriv::Quad(quad.subsegment(range)),
+        }
+    }
+
+    // #[inline]
+    fn get_affine_transformed(&self, affine: &Affine) -> Self {
+        *affine * *self
+    }
+}
+
+impl ParamCurveDeriv for PathSeg {
+    type DerivResult = PathSegDeriv;
+
+    fn deriv(&self) -> PathSegDeriv {
+        match *self {
+            PathSeg::Line(line) => PathSegDeriv::Point(line.deriv()),
+            PathSeg::Quad(quad) => PathSegDeriv::Line(quad.deriv()),
+            PathSeg::Cubic(cubic) => PathSegDeriv::Quad(cubic.deriv()),
+        }
     }
 }
 

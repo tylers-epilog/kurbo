@@ -5,7 +5,7 @@
 use crate::common::{solve_cubic, solve_linear, solve_quadratic};
 use crate::{
     Affine, CubicBez, Line, ParamCurve, ParamCurveArclen, ParamCurveDeriv, ParamCurveExtrema,
-    Point, QuadBez, Rect,
+    PathSeg, Point, QuadBez, Rect,
 };
 use arrayvec::ArrayVec;
 use std::ops::Range;
@@ -252,6 +252,39 @@ impl ParamCurveBezierClipping for CubicBez {
         }
 
         hull
+    }
+}
+
+impl ParamCurveBezierClipping for PathSeg {
+    fn solve_t_for_x(&self, x: f64) -> ArrayVec<f64, 3> {
+        match *self {
+            PathSeg::Line(line) => line.solve_t_for_x(x),
+            PathSeg::Quad(quad) => quad.solve_t_for_x(x),
+            PathSeg::Cubic(cubic) => cubic.solve_t_for_x(x),
+        }
+    }
+    fn solve_t_for_y(&self, y: f64) -> ArrayVec<f64, 3> {
+        match *self {
+            PathSeg::Line(line) => line.solve_t_for_y(y),
+            PathSeg::Quad(quad) => quad.solve_t_for_y(y),
+            PathSeg::Cubic(cubic) => cubic.solve_t_for_y(y),
+        }
+    }
+
+    fn fat_line_min_max(&self, baseline: &Line) -> (f64, f64) {
+        match *self {
+            PathSeg::Line(line) => line.fat_line_min_max(baseline),
+            PathSeg::Quad(quad) => quad.fat_line_min_max(baseline),
+            PathSeg::Cubic(cubic) => cubic.fat_line_min_max(baseline),
+        }
+    }
+
+    fn convex_hull_from_line(&self, l: &Line) -> (Vec<Point>, Vec<Point>) {
+        match *self {
+            PathSeg::Line(line) => line.convex_hull_from_line(l),
+            PathSeg::Quad(quad) => quad.convex_hull_from_line(l),
+            PathSeg::Cubic(cubic) => cubic.convex_hull_from_line(l),
+        }
     }
 }
 

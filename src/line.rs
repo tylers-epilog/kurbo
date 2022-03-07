@@ -165,7 +165,7 @@ impl ParamCurveExtrema for Line {
 }
 
 /// A trivial "curve" that is just a constant.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ConstPoint(Point);

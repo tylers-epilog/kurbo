@@ -1,4 +1,4 @@
-/// Boolean operations on BezPaths
+/// This code in this file peformes boolean operations on BezPaths
 use crate::curve_intersections::*;
 use crate::{BezPath, ParamCurve, ParamCurveExtrema, PathSeg, Point};
 use arrayvec::ArrayVec;
