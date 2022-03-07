@@ -1,5 +1,7 @@
 /// Boolean operations on BezPaths
-use crate::BezPath;
+use crate::curve_intersections::*;
+use crate::{BezPath, ParamCurve, ParamCurveExtrema, PathSeg, Point};
+use arrayvec::ArrayVec;
 
 /// An operation that can be performed on a path
 #[derive(Clone, Debug, PartialEq)]
@@ -23,10 +25,10 @@ bitflags::bitflags! {
     // private struct, used in do_path_op
     struct ClosedPathOperationsFlags: u32 {
        const DISCARD_SEGS       = 0b00000000;
-       const KEEP_A_OUTSIDE_B   = 0b00000101;
-       const KEEP_A_INSIDE_B    = 0b00000110;
-       const KEEP_B_INSIDE_A    = 0b00001001;
-       const KEEP_B_OUTSIDE_A   = 0b00001010;
+       const KEEP_A_OUTSIDE_B   = 0b00000001;
+       const KEEP_A_INSIDE_B    = 0b00000010;
+       const KEEP_B_INSIDE_A    = 0b00000100;
+       const KEEP_B_OUTSIDE_A   = 0b00001000;
        const KEEP_ALL_SEGS      = Self::KEEP_A_OUTSIDE_B.bits
                                 | Self::KEEP_A_INSIDE_B.bits
                                 | Self::KEEP_B_INSIDE_A.bits
@@ -97,6 +99,61 @@ pub fn path_path_operation(path_a: &BezPath, operation: PathOperation) -> BezPat
     }
 }
 
+/// Gets possible self intersections for a given path segment, ignoring the end
+/// points
+fn segment_self_intersections(segment: &PathSeg, accuracy: f64) -> ArrayVec<(f64, f64), 9> {
+    match segment {
+        PathSeg::Cubic(bez) => {
+            if Point::is_near(bez.p0, bez.p3, accuracy) {
+                // Only the endpoints intersect, which we will ignore
+                return ArrayVec::<(f64, f64), 9>::new();
+            }
+
+            // I'll make the argument (based on experiemntation) that if we
+            // take any cubic bezier where the start and end points are
+            // horizontal to each other, and split it at the maximum y
+            // posiiton, the two halves will intersect IFF the cibic bezier
+            // curve is self-intersecting.
+
+            // The first step in finding this split point is to transform the
+            // bezier curve so that start/end points are horizontal.
+            let bez_uv = bez.transform_to_uv();
+
+            // Then find the t-value of the largest peak
+            let extrema_y = bez_uv.extrema_y();
+            let max_peak = extrema_y.iter().fold(0., |acc, t| {
+                let pt_acc = bez_uv.eval(acc);
+                let pt_t = bez_uv.eval(*t);
+                if pt_t.y.abs() > pt_acc.y.abs() {
+                    *t
+                } else {
+                    acc
+                }
+            });
+
+            // Split the original bezier at the location of the peak
+            let (domain1, domain2) = &(0.0..max_peak, max_peak..1.0);
+            let (curve1, curve2) = (
+                bez.subsegment(domain1.clone()),
+                bez.subsegment(domain2.clone()),
+            );
+
+            // Return the intersections of the two curves, not including end-points
+            curve_curve_intersections(&curve1, &curve2, CurveIntersectionFlags::NONE, accuracy)
+                .into_iter()
+                .map(|(t1, t2)| {
+                    (
+                        domain_value_at_t(domain1, t1),
+                        domain_value_at_t(domain2, t2),
+                    )
+                })
+                .collect::<ArrayVec<_, 9>>()
+        }
+        // No other segment type can self intersect
+        _ => ArrayVec::<(f64, f64), 9>::new(),
+    }
+}
+
 /// This function converts a winding-fill path into an even-odd filled path
 /// Note: Since there is no winding fill property of path, the path is assumed
 /// to have a winding fill when this function is called
@@ -123,12 +180,12 @@ fn do_path_op(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Circle, Point, Shape};
+    use crate::{Circle, Shape};
 
     #[test]
     fn test_circle_unite_circle() {
-        let c1 = Circle::new(Point::new(0., 0.), 10.).to_path(1e-3);
-        let c2 = Circle::new(Point::new(5., 0.), 10.).to_path(1e-3);
+        let c1 = Circle::new((0., 0.), 10.).to_path(1e-3);
+        let c2 = Circle::new((5., 0.), 10.).to_path(1e-3);
         let res = path_path_operation(&c1, PathOperation::Subtract(&c2));
         // @TODO DO THIS
         //assert_eq!(res.elements().len(), 8);

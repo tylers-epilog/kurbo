@@ -1042,7 +1042,7 @@ fn walk_convex_hull_edges_to_fat_line(
 
 #[inline]
 // Return the point of domain corresponding to the point t, 0 <= t <= 1.
-fn domain_value_at_t(domain: &Range<f64>, t: f64) -> f64 {
+pub fn domain_value_at_t(domain: &Range<f64>, t: f64) -> f64 {
     domain.start + (domain.end - domain.start) * t
 }
 

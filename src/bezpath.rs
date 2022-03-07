@@ -379,7 +379,7 @@ impl BezPath {
             return Vec::<BezPath>::new(); // empty path
         }
 
-        // Split by move_tos
+        // Split by move_to's
         self.0
             .iter()
             .skip(1) // Skip first element since it's always treated as a move-to
