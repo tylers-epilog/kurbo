@@ -33,7 +33,7 @@ bitflags::bitflags! {
                                 | Self::KEEP_A_INSIDE_B.bits
                                 | Self::KEEP_B_INSIDE_A.bits
                                 | Self::KEEP_B_OUTSIDE_A.bits;
-   }
+    }
 }
 
 /// Compute an operation between two paths

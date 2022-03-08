@@ -414,6 +414,50 @@ impl BezPath {
             .collect::<Vec<_>>()
     }
 
+    /// Closes all subpaths
+    pub fn close_subpaths(&mut self) {
+        if self.0.is_empty() {
+            return; // No subpaths to close
+        }
+       
+        /// Gets the end point of an element
+        fn find_element_end(element: &PathEl) -> Point {
+            match element {
+                PathEl::MoveTo(p) => *p,
+                PathEl::LineTo(p) => *p,
+                PathEl::QuadTo(_, p) => *p,
+                PathEl::CurveTo(_, _, p) => *p,
+                _ => panic!("Can't get endpoint of a ClosePath in this function"),
+            }
+        }
+        
+        /// Gets the start of the subpath from the given element iterator
+        fn find_subpath_start(path: &BezPath, index: usize) -> Point {
+            match path.0[..index].iter().rev().find_map(|el| match *el { PathEl::MoveTo(start) => Some(start), _ => None, }) {
+                Some(point) => point,
+                None => {
+                    // This can happen when the path doesn't start with a move-to like it should
+                    match path.0.get(0) {
+                        Some(el) => find_element_end(el),
+                        _ => panic!("Path is empty when it shouldn't be!"),
+                    }
+                }
+            }
+        }
+        
+        // Find move-tos and then close subpaths
+        let insert_positions = self.0.iter()
+            .skip(1) // Skip first element since it's always treated as a move-to
+            .enumerate().filter(|el| match el.1 { PathEl::MoveTo(_) => true, _ => false }).map(|(i, _)| i + 1) // Get index of each move-to
+            .chain(vec![self.0.len()].into_iter()) // Append the size of the element list
+            .filter(|i| match self.0[i - 1] { PathEl::ClosePath => false, _ => true }) // Filter out subpaths that are already closed
+            .map(|i| (i, (find_subpath_start(self, i), find_element_end(&self.0[i - 1])))) // Find start/end points of subpaths
+            .filter_map(|(i, (start, end))| if start != end { Some(i) } else { None }) // Find which subpaths are implicitly closed already
+            .rev() // Insert the close-paths in reverse order
+            .collect::<Vec<_>>();
+        insert_positions.iter().for_each(|i| self.0.insert(*i, PathEl::ClosePath));
+    }
+
     /// Is this path finite?
     #[inline]
     pub fn is_finite(&self) -> bool {
@@ -1432,6 +1476,27 @@ mod tests {
         assert_eq!(path_list[0].0.len(), 2);
         assert_eq!(path_list[1].0.len(), 3);
         assert_eq!(path_list[2].0.len(), 4);
+    }
+
+    #[test]
+    fn test_close_subpaths() {
+        let mut path = BezPath::new();
+        path.move_to((0.0,  0.0));
+        path.line_to((10.0, 0.0));
+        path.move_to((0.0,  100.0));
+        path.line_to((10.0, 100.0));
+        path.line_to((20.0, 100.0));
+        path.move_to((0.0,  200.0));
+        path.move_to((0.0,  300.0));
+        path.line_to((10.0, 300.0));
+        path.line_to((20.0, 300.0));
+        path.line_to((30.0, 300.0));
+        path.close_subpaths();
+      
+        // assert_eq!(path_list.len(), 3);
+        // assert_eq!(path_list[0].0.len(), 2);
+        // assert_eq!(path_list[1].0.len(), 3);
+        // assert_eq!(path_list[2].0.len(), 4);
     }
 
     #[test]
