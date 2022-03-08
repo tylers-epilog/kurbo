@@ -223,8 +223,18 @@ impl ParamCurve for QuadBez {
     }
 
     #[inline]
+    fn set_start(&mut self, pt: Point) {
+        self.p0 = pt;
+    }
+
+    #[inline]
     fn end(&self) -> Point {
         self.p2
+    }
+
+    #[inline]
+    fn set_end(&mut self, pt: Point) {
+        self.p2 = pt;
     }
 
     #[inline]

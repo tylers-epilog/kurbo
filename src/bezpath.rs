@@ -419,7 +419,7 @@ impl BezPath {
         if self.0.is_empty() {
             return; // No subpaths to close
         }
-       
+
         /// Gets the end point of an element
         fn find_element_end(element: &PathEl) -> Point {
             match element {
@@ -430,10 +430,13 @@ impl BezPath {
                 _ => panic!("Can't get endpoint of a ClosePath in this function"),
             }
         }
-        
+
         /// Gets the start of the subpath from the given element iterator
         fn find_subpath_start(path: &BezPath, index: usize) -> Point {
-            match path.0[..index].iter().rev().find_map(|el| match *el { PathEl::MoveTo(start) => Some(start), _ => None, }) {
+            match path.0[..index].iter().rev().find_map(|el| match *el {
+                PathEl::MoveTo(start) => Some(start),
+                _ => None,
+            }) {
                 Some(point) => point,
                 None => {
                     // This can happen when the path doesn't start with a move-to like it should
@@ -444,18 +447,161 @@ impl BezPath {
                 }
             }
         }
-        
+
         // Find move-tos and then close subpaths
-        let insert_positions = self.0.iter()
+        let insert_positions = self
+            .0
+            .iter()
             .skip(1) // Skip first element since it's always treated as a move-to
-            .enumerate().filter(|el| match el.1 { PathEl::MoveTo(_) => true, _ => false }).map(|(i, _)| i + 1) // Get index of each move-to
+            .enumerate() // Get index of each move-to
+            .filter(|el| match el.1 {
+                PathEl::MoveTo(_) => true,
+                _ => false,
+            })
+            .map(|(i, _)| i + 1)
             .chain(vec![self.0.len()].into_iter()) // Append the size of the element list
-            .filter(|i| match self.0[i - 1] { PathEl::ClosePath => false, _ => true }) // Filter out subpaths that are already closed
-            .map(|i| (i, (find_subpath_start(self, i), find_element_end(&self.0[i - 1])))) // Find start/end points of subpaths
+            .filter(|i| match self.0[i - 1] {
+                // Filter out subpaths that are already closed
+                PathEl::ClosePath => false,
+                _ => true,
+            })
+            .map(|i| {
+                // Find start/end points of subpaths
+                (
+                    i,
+                    (
+                        find_subpath_start(self, i),
+                        find_element_end(&self.0[i - 1]),
+                    ),
+                )
+            })
             .filter_map(|(i, (start, end))| if start != end { Some(i) } else { None }) // Find which subpaths are implicitly closed already
             .rev() // Insert the close-paths in reverse order
             .collect::<Vec<_>>();
-        insert_positions.iter().for_each(|i| self.0.insert(*i, PathEl::ClosePath));
+        insert_positions
+            .iter()
+            .for_each(|i| self.0.insert(*i, PathEl::ClosePath));
+    }
+
+    /// Break paths segments at specified intersection points and snaps those points together
+    pub fn break_at_intersections(&mut self, intersections: &Vec<((usize, f64), (usize, f64))>) {
+        if self.0.is_empty() {
+            return; // No path to break
+        }
+
+        if intersections.is_empty() {
+            return; // No intersections to break at
+        }
+
+        // Convert the list of elements into a vector of tuples to make tracking indices easier
+        let mut elements = self
+            .elements()
+            .iter()
+            .enumerate()
+            .map(|(index, el)| (el, vec![(self.get_seg(index), (0.0..1.0))]))
+            .collect::<Vec<_>>();
+
+        // Split the segments at each intersection
+        intersections
+            .iter()
+            .for_each(|&((index1, t1), (index2, t2))| {
+                fn find_segment_index(
+                    segs: &Vec<(Option<PathSeg>, Range<f64>)>,
+                    t: f64,
+                ) -> Option<(usize, (PathSeg, Range<f64>))> {
+                    // Find which range contains the t parameter
+                    segs.iter()
+                        .enumerate()
+                        .filter(|(_, (seg, _))| seg.is_some()) // Ignore elements that cannot be converted to segments
+                        .find(|(_, (_, range))| range.contains(&t)) // Search for the range containing t
+                        .map(|(index, (seg, range))| (index, (seg.unwrap(), range.clone())))
+                }
+
+                // Split segments at each intersection
+                fn modify_segment_list(
+                    segs: &mut Vec<(Option<PathSeg>, Range<f64>)>,
+                    t: f64,
+                ) -> usize {
+                    let (seg_index, (seg, range)) =
+                        find_segment_index(&segs, t).expect("Intersection segment not found!");
+                    let t_mapped = (t - range.start) / (range.end - range.start);
+
+                    // Replace segment with 2 subsegments
+                    segs.splice(
+                        seg_index..(seg_index + 1),
+                        vec![
+                            (Some(seg.subsegment(0.0..t_mapped)), (range.start..t)),
+                            (Some(seg.subsegment(t_mapped..1.0)), (t..range.end)),
+                        ],
+                    );
+
+                    seg_index
+                }
+                let seg_index1 = modify_segment_list(
+                    &mut elements
+                        .get_mut(index1)
+                        .expect("Intersection index out of range!")
+                        .1,
+                    t1,
+                );
+                let seg_index2 = modify_segment_list(
+                    &mut elements
+                        .get_mut(index2)
+                        .expect("Intersection index out of range!")
+                        .1,
+                    t2,
+                );
+
+                // If we are splitting the same segment, and t2 < t1, seg_index1 needs to be adjusted
+                let seg_index1 = if index1 == index2 && t2 < t1 {
+                    seg_index1 + 1
+                } else {
+                    seg_index1
+                };
+
+                // Snap intersection points to be exactly the same
+                let pt_snap = ((elements[index1].1[seg_index1].0.unwrap().end().to_vec2()
+                    + elements[index2].1[seg_index2].0.unwrap().end().to_vec2())
+                    / 2.)
+                    .to_point();
+                elements[index1].1[seg_index1].0.unwrap().set_end(pt_snap);
+                elements[index1].1[seg_index1 + 1]
+                    .0
+                    .unwrap()
+                    .set_start(pt_snap);
+                elements[index2].1[seg_index2].0.unwrap().set_end(pt_snap);
+                elements[index2].1[seg_index2 + 1]
+                    .0
+                    .unwrap()
+                    .set_start(pt_snap);
+            });
+
+        // Create a new list of segments
+        self.0 = elements
+            .into_iter()
+            .map(|(el, segs)| {
+                // Convert list of segments into list of elements
+                match el {
+                    PathEl::MoveTo(_) => vec![*el], // No need to convert the element
+                    _ => {
+                        segs.iter()
+                            .filter_map(|(seg, _)| *seg) // Discard the range and unwrap the segments
+                            .map(|seg| {
+                                // Convert to path elements
+                                match seg {
+                                    PathSeg::Line(line) => PathEl::LineTo(line.p1),
+                                    PathSeg::Quad(quad) => PathEl::QuadTo(quad.p1, quad.p2),
+                                    PathSeg::Cubic(cubic) => {
+                                        PathEl::CurveTo(cubic.p1, cubic.p2, cubic.p3)
+                                    }
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                    }
+                }
+            })
+            .flatten() // Flatten into one list of segments
+            .collect::<Vec<_>>();
     }
 
     /// Is this path finite?
@@ -817,7 +963,23 @@ impl ParamCurve for PathSeg {
         }
     }
 
-    // #[inline]
+    fn set_start(&mut self, pt: Point) {
+        match *self {
+            PathSeg::Line(mut line) => line.set_start(pt),
+            PathSeg::Quad(mut quad) => quad.set_start(pt),
+            PathSeg::Cubic(mut cubic) => cubic.set_start(pt),
+        }
+    }
+
+    fn set_end(&mut self, pt: Point) {
+        match *self {
+            PathSeg::Line(mut line) => line.set_end(pt),
+            PathSeg::Quad(mut quad) => quad.set_end(pt),
+            PathSeg::Cubic(mut cubic) => cubic.set_end(pt),
+        }
+    }
+
+    #[inline]
     fn get_affine_transformed(&self, affine: &Affine) -> Self {
         *affine * *self
     }
@@ -837,6 +999,22 @@ impl ParamCurve for PathSegDeriv {
             PathSegDeriv::Point(point) => PathSegDeriv::Point(point.subsegment(range)),
             PathSegDeriv::Line(line) => PathSegDeriv::Line(line.subsegment(range)),
             PathSegDeriv::Quad(quad) => PathSegDeriv::Quad(quad.subsegment(range)),
+        }
+    }
+
+    fn set_start(&mut self, pt: Point) {
+        match *self {
+            PathSegDeriv::Point(mut point) => point.set_start(pt),
+            PathSegDeriv::Line(mut line) => line.set_start(pt),
+            PathSegDeriv::Quad(mut quad) => quad.set_start(pt),
+        }
+    }
+
+    fn set_end(&mut self, pt: Point) {
+        match *self {
+            PathSegDeriv::Point(mut point) => point.set_end(pt),
+            PathSegDeriv::Line(mut line) => line.set_end(pt),
+            PathSegDeriv::Quad(mut quad) => quad.set_end(pt),
         }
     }
 
@@ -1481,22 +1659,34 @@ mod tests {
     #[test]
     fn test_close_subpaths() {
         let mut path = BezPath::new();
-        path.move_to((0.0,  0.0));
+        path.move_to((0.0, 0.0));
         path.line_to((10.0, 0.0));
-        path.move_to((0.0,  100.0));
+        path.move_to((0.0, 100.0));
         path.line_to((10.0, 100.0));
         path.line_to((20.0, 100.0));
-        path.move_to((0.0,  200.0));
-        path.move_to((0.0,  300.0));
+        path.move_to((0.0, 200.0));
+        path.move_to((0.0, 300.0));
         path.line_to((10.0, 300.0));
         path.line_to((20.0, 300.0));
         path.line_to((30.0, 300.0));
         path.close_subpaths();
-      
-        // assert_eq!(path_list.len(), 3);
-        // assert_eq!(path_list[0].0.len(), 2);
-        // assert_eq!(path_list[1].0.len(), 3);
-        // assert_eq!(path_list[2].0.len(), 4);
+
+        assert_eq!(path.0.len(), 13);
+    }
+
+    #[test]
+    fn test_break_at_intersections() {
+        let mut path = BezPath::new();
+        path.move_to((0.0, 0.0));
+        path.line_to((1.0, 1.0));
+        path.line_to((0.0, 1.0));
+        path.line_to((1.0, 1.0));
+
+        let mut path2 = path.clone();
+        let intersections = vec![((1, 0.5), (3, 0.5))];
+
+        path2.break_at_intersections(&intersections);
+        assert_eq!(path2.0.len(), path.0.len() + intersections.len() * 2);
     }
 
     #[test]

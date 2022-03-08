@@ -37,6 +37,9 @@ pub trait ParamCurve: Sized {
         self.eval(0.0)
     }
 
+    /// Sets the start point to a new position.
+    fn set_start(&mut self, pt: Point);
+
     /// The end point.
     fn end(&self) -> Point {
         self.eval(1.0)
@@ -46,6 +49,9 @@ pub trait ParamCurve: Sized {
     fn baseline(&self) -> Line {
         Line::new(self.start(), self.end())
     }
+
+    /// Sets the end point to a new position.
+    fn set_end(&mut self, pt: Point);
 
     /// Transforms self using an affine trasnform
     fn get_affine_transformed(&self, affine: &Affine) -> Self;

@@ -90,8 +90,18 @@ impl ParamCurve for Line {
     }
 
     #[inline]
+    fn set_start(&mut self, pt: Point) {
+        self.p0 = pt;
+    }
+
+    #[inline]
     fn end(&self) -> Point {
         self.p1
+    }
+
+    #[inline]
+    fn set_end(&mut self, pt: Point) {
+        self.p1 = pt;
     }
 
     #[inline]
@@ -193,6 +203,16 @@ impl ParamCurve for ConstPoint {
     #[inline]
     fn subsegment(&self, _range: Range<f64>) -> ConstPoint {
         *self
+    }
+
+    #[inline]
+    fn set_start(&mut self, pt: Point) {
+        self.0 = pt;
+    }
+
+    #[inline]
+    fn set_end(&mut self, pt: Point) {
+        self.0 = pt;
     }
 
     #[inline]

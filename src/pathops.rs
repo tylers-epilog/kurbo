@@ -156,47 +156,47 @@ fn segment_self_intersections(segment: &PathSeg, accuracy: f64) -> ArrayVec<(f64
 
 /// Gets the index and t-parameter of each segment in the path that intersects
 /// with another segment in the path
-fn path_self_intersections(
-    path: &BezPath,
-    accuracy: f64,
-) -> Vec::<((usize, f64), (usize, f64))> {
-    let segments = path.iter()
+fn path_self_intersections(path: &BezPath, accuracy: f64) -> Vec<((usize, f64), (usize, f64))> {
+    let segments = path
+        .iter()
         .enumerate()
-        .filter_map(|(index, element)| {
-            match path.get_seg(index) {
-                Some(seg) => Some((index, seg)),
-                None => None
-            }
+        .filter_map(|(index, _)| match path.get_seg(index) {
+            Some(seg) => Some((index, seg)),
+            None => None,
         })
         .collect::<Vec<_>>();
 
     // Find self-intersecting segments
-    segments.iter().by_ref()
+    segments
+        .iter()
+        .by_ref()
         .map(|&(index, seg)| {
-            segment_self_intersections(&seg, accuracy).into_iter() // Get self-intersections for each segment
+            segment_self_intersections(&seg, accuracy)
+                .into_iter() // Get self-intersections for each segment
                 .map(|intersect| ((index, intersect.0), (index, intersect.1)))
                 .chain(
-                    segments.iter()
+                    segments
+                        .iter()
                         .filter(|&(index2, _)| *index2 > index)
                         .map(|&(index2, seg2)| {
                             let flags = if index == 1 && index2 == path.elements().len() - 1 {
                                 // Don't capture the endpoint intersection caused by the paths being closed
                                 CurveIntersectionFlags::KEEP_CURVE1_T1_INTERSECTION
-                                | CurveIntersectionFlags::KEEP_CURVE2_T0_INTERSECTION
+                                    | CurveIntersectionFlags::KEEP_CURVE2_T0_INTERSECTION
                             } else if index2 == index + 1 {
                                 // Don't capture the endpoint intersection caused by the segments being sequential
                                 CurveIntersectionFlags::KEEP_CURVE1_T0_INTERSECTION
-                                | CurveIntersectionFlags::KEEP_CURVE2_T1_INTERSECTION
+                                    | CurveIntersectionFlags::KEEP_CURVE2_T1_INTERSECTION
                             } else {
                                 // Capture all endpoint intersections
                                 CurveIntersectionFlags::KEEP_ALL_ENDPOINT_INTERSECTIONS
                             };
-                            //curve_curve_intersections(&seg, &seg2, flags, accuracy).into_iter() // Get intersections with segments after this one
-                            curve_curve_intersections(&seg, &seg2, flags, accuracy).into_iter() // Get intersections with segments after this one
+                            curve_curve_intersections(&seg, &seg2, flags, accuracy)
+                                .into_iter() // Get intersections with segments after this one
                                 .map(|intersect| ((index, intersect.0), (index2, intersect.1)))
                                 .collect::<Vec<_>>()
                         })
-                        .flatten()
+                        .flatten(),
                 )
                 .collect::<Vec<_>>()
         })

@@ -418,8 +418,18 @@ impl ParamCurve for CubicBez {
     }
 
     #[inline]
+    fn set_start(&mut self, pt: Point) {
+        self.p0 = pt;
+    }
+
+    #[inline]
     fn end(&self) -> Point {
         self.p3
+    }
+
+    #[inline]
+    fn set_end(&mut self, pt: Point) {
+        self.p3 = pt;
     }
 
     #[inline]
