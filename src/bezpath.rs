@@ -8,7 +8,7 @@ use std::ops::{Mul, Range};
 
 use arrayvec::ArrayVec;
 
-use crate::common::{solve_cubic, solve_quadratic};
+use crate::common::{solve_cubic, solve_quadratic, solve_linear};
 use crate::MAX_EXTREMA;
 use crate::{
     Affine, ConstPoint, CubicBez, Line, Nearest, ParamCurve, ParamCurveArclen, ParamCurveArea,
@@ -1113,87 +1113,117 @@ impl PathSeg {
     }
 
     // Assumes split at extrema.
-    fn winding_inner(&self, p: Point) -> i32 {
+    fn winding_inner<T: Fn(Point) -> f64, U: Fn(Point) -> f64>(&self, p: Point, convert: T, convert_perp: U) -> Option<(f64, i32)> {
         let start = self.start();
         let end = self.end();
-        let sign = if end.y > start.y {
-            if p.y < start.y || p.y >= end.y {
-                return 0;
+
+        let start_par = convert(start);
+        let start_perp = convert_perp(start);
+        let end_par = convert(end);
+        let end_perp = convert_perp(end);
+        let p_par = convert(p);
+        let p_perp = convert_perp(p);
+
+        let sign = if end_perp > start_perp {
+            if p_perp < start_perp || p_perp >= end_perp {
+                return None;
             }
-            -1
-        } else if end.y < start.y {
-            if p.y < end.y || p.y >= start.y {
-                return 0;
+            Some(-1)
+        } else if end_perp < start_perp {
+            if p_perp < end_perp || p_perp >= start_perp {
+                return None;
             }
-            1
+            Some(1)
         } else {
-            return 0;
+            // This can only happen for coincident lines. We can effectively
+            // ignore this situation.
+            None
         };
+
+        if sign.is_none() {
+            // Self does not intersect with the ray
+            return None;
+        }
+        let sign = sign.unwrap();
+
         match *self {
             PathSeg::Line(_line) => {
-                if p.x < start.x.min(end.x) {
-                    return 0;
+                if p_par < start_par.min(end_par) {
+                    // Self does not intersect with the ray
+                    return None;
                 }
-                if p.x >= start.x.max(end.x) {
-                    return sign;
-                }
-                // line equation ax + by = c
-                let a = end.y - start.y;
-                let b = start.x - end.x;
-                let c = a * start.x + b * start.y;
-                if (a * p.x + b * p.y - c) * (sign as f64) <= 0.0 {
-                    sign
+                
+                // Line equation ax + by = c
+                let a = end_perp - start_perp;
+                let b = start_par - end_par;
+                let c = a * start_par + b * start_perp;
+                if (a * p_par + b * p_perp - c) * (sign as f64) >= 0.0 {
+                    let (c0, c1) = (c / a, -b / a);
+                    if c0.is_infinite() || c1.is_infinite() {
+                        return None;
+                    }
+                    Some((solve_linear(c0, c1)[0], sign))
                 } else {
-                    0
+                    None
                 }
             }
             PathSeg::Quad(quad) => {
                 let p1 = quad.p1;
-                if p.x < start.x.min(end.x).min(p1.x) {
-                    return 0;
+                let p1_par = convert(p1);
+                let p1_perp = convert_perp(p1);
+
+                if p_par < start_par.min(end_par).min(p1_par) {
+                    return None;
                 }
-                if p.x >= start.x.max(end.x).max(p1.x) {
-                    return sign;
-                }
-                let a = end.y - 2.0 * p1.y + start.y;
-                let b = 2.0 * (p1.y - start.y);
-                let c = start.y - p.y;
+
+                // Quadratic equation
+                let a = end_perp - 2.0 * p1_perp + start_perp;
+                let b = 2.0 * (p1_perp - start_perp);
+                let c = start_perp - p_perp;
                 for t in solve_quadratic(c, b, a) {
                     if (0.0..=1.0).contains(&t) {
-                        let x = quad.eval(t).x;
-                        if p.x >= x {
-                            return sign;
+                        let x = convert(quad.eval(t));
+                        if p_par >= x {
+                            return Some((x, sign));
                         } else {
-                            return 0;
+                            return None;
                         }
                     }
                 }
-                0
+                
+                // No intersections with ray
+                None
             }
             PathSeg::Cubic(cubic) => {
                 let p1 = cubic.p1;
                 let p2 = cubic.p2;
-                if p.x < start.x.min(end.x).min(p1.x).min(p2.x) {
-                    return 0;
+                let p1_par = convert(p1);
+                let p1_perp = convert_perp(p1);
+                let p2_par = convert(p2);
+                let p2_perp = convert_perp(p2);
+                
+                if p_par < start_par.min(end_par).min(p1_par).min(p2_par) {
+                    return None;
                 }
-                if p.x >= start.x.max(end.x).max(p1.x).max(p2.x) {
-                    return sign;
-                }
-                let a = end.y - 3.0 * p2.y + 3.0 * p1.y - start.y;
-                let b = 3.0 * (p2.y - 2.0 * p1.y + start.y);
-                let c = 3.0 * (p1.y - start.y);
-                let d = start.y - p.y;
+                
+                // Cubic equation
+                let a = end_perp - 3.0 * p2_perp + 3.0 * p1_perp - start_perp;
+                let b = 3.0 * (p2_perp - 2.0 * p1_perp + start_perp);
+                let c = 3.0 * (p1_perp - start_perp);
+                let d = start_perp - p_perp;
                 for t in solve_cubic(d, c, b, a) {
                     if (0.0..=1.0).contains(&t) {
-                        let x = cubic.eval(t).x;
-                        if p.x >= x {
-                            return sign;
+                        let x = convert(cubic.eval(t));
+                        if p_par >= x {
+                            return Some((x, sign));
                         } else {
-                            return 0;
+                            return None;
                         }
                     }
                 }
-                0
+                
+                // No intersections with ray
+                None
             }
         }
     }
@@ -1202,10 +1232,29 @@ impl PathSeg {
     ///
     /// Cast a ray to the left and count intersections.
     fn winding(&self, p: Point) -> i32 {
+        self.winding_x_results(p).into_iter()
+            .map(|(_, sign)| sign)
+            .sum()
+    }
+
+    /// Compute the winding number contribution and points of intersection of a single segment along a horizontal ray.
+    ///
+    /// Cast a ray to the left and record intersections.
+    fn winding_x_results(&self, p: Point) -> Vec<(f64, i32)> {
         self.extrema_ranges()
             .into_iter()
-            .map(|range| self.subsegment(range).winding_inner(p))
-            .sum()
+            .filter_map(|range| self.subsegment(range).winding_inner(p, |pt| pt.x, |pt| pt.y))
+            .collect()
+    }
+
+    /// Compute the winding number contribution and points of intersection of a single segment along a vertical ray.
+    ///
+    /// Cast a ray to the upwards and record intersections.
+    fn winding_y_results(&self, p: Point) -> Vec<(f64, i32)> {
+        self.extrema_ranges()
+            .into_iter()
+            .filter_map(|range| self.subsegment(range).winding_inner(p, |pt| pt.y, |pt| pt.x))
+            .collect()
     }
 
     /// Compute intersections against a line.
