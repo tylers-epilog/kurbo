@@ -8,7 +8,7 @@ use std::ops::{Mul, Range};
 
 use arrayvec::ArrayVec;
 
-use crate::common::{solve_cubic, solve_quadratic, solve_linear};
+use crate::common::{solve_cubic, solve_linear, solve_quadratic};
 use crate::MAX_EXTREMA;
 use crate::{
     Affine, ConstPoint, CubicBez, Line, Nearest, ParamCurve, ParamCurveArclen, ParamCurveArea,
@@ -576,7 +576,7 @@ impl BezPath {
                     .set_start(pt_snap);
             });
 
-        // Create a new list of segments
+        // Create a new list of elements
         self.0 = elements
             .into_iter()
             .map(|(el, segs)| {
@@ -588,14 +588,17 @@ impl BezPath {
                             .filter_map(|(seg, _)| *seg) // Discard the range and unwrap the segments
                             .map(|seg| {
                                 // Convert to path elements
-                                match seg {
+                                let el = match seg {
                                     PathSeg::Line(line) => PathEl::LineTo(line.p1),
                                     PathSeg::Quad(quad) => PathEl::QuadTo(quad.p1, quad.p2),
                                     PathSeg::Cubic(cubic) => {
                                         PathEl::CurveTo(cubic.p1, cubic.p2, cubic.p3)
                                     }
-                                }
+                                };
+                                vec![PathEl::MoveTo(seg.start()), el]
                             })
+                            .flatten()
+                            .skip(1) // Skip the extra move-to added at the beginning
                             .collect::<Vec<_>>()
                     }
                 }
@@ -1113,7 +1116,12 @@ impl PathSeg {
     }
 
     // Assumes split at extrema.
-    fn winding_inner<T: Fn(Point) -> f64, U: Fn(Point) -> f64>(&self, p: Point, convert: T, convert_perp: U) -> Option<(f64, i32)> {
+    fn winding_inner<T: Fn(Point) -> f64, U: Fn(Point) -> f64>(
+        &self,
+        p: Point,
+        convert: T,
+        convert_perp: U,
+    ) -> Option<(f64, i32)> {
         let start = self.start();
         let end = self.end();
 
@@ -1152,7 +1160,7 @@ impl PathSeg {
                     // Self does not intersect with the ray
                     return None;
                 }
-                
+
                 // Line equation ax + by = c
                 let a = end_perp - start_perp;
                 let b = start_par - end_par;
@@ -1190,7 +1198,7 @@ impl PathSeg {
                         }
                     }
                 }
-                
+
                 // No intersections with ray
                 None
             }
@@ -1201,11 +1209,11 @@ impl PathSeg {
                 let p1_perp = convert_perp(p1);
                 let p2_par = convert(p2);
                 let p2_perp = convert_perp(p2);
-                
+
                 if p_par < start_par.min(end_par).min(p1_par).min(p2_par) {
                     return None;
                 }
-                
+
                 // Cubic equation
                 let a = end_perp - 3.0 * p2_perp + 3.0 * p1_perp - start_perp;
                 let b = 3.0 * (p2_perp - 2.0 * p1_perp + start_perp);
@@ -1221,7 +1229,7 @@ impl PathSeg {
                         }
                     }
                 }
-                
+
                 // No intersections with ray
                 None
             }
@@ -1232,7 +1240,8 @@ impl PathSeg {
     ///
     /// Cast a ray to the left and count intersections.
     fn winding(&self, p: Point) -> i32 {
-        self.winding_x_results(p).into_iter()
+        self.winding_x_results(p)
+            .into_iter()
             .map(|(_, sign)| sign)
             .sum()
     }
@@ -1243,7 +1252,10 @@ impl PathSeg {
     fn winding_x_results(&self, p: Point) -> Vec<(f64, i32)> {
         self.extrema_ranges()
             .into_iter()
-            .filter_map(|range| self.subsegment(range).winding_inner(p, |pt| pt.x, |pt| pt.y))
+            .filter_map(|range| {
+                self.subsegment(range)
+                    .winding_inner(p, |pt| pt.x, |pt| pt.y)
+            })
             .collect()
     }
 
@@ -1253,7 +1265,10 @@ impl PathSeg {
     fn winding_y_results(&self, p: Point) -> Vec<(f64, i32)> {
         self.extrema_ranges()
             .into_iter()
-            .filter_map(|range| self.subsegment(range).winding_inner(p, |pt| pt.y, |pt| pt.x))
+            .filter_map(|range| {
+                self.subsegment(range)
+                    .winding_inner(p, |pt| pt.y, |pt| pt.x)
+            })
             .collect()
     }
 
@@ -1735,7 +1750,7 @@ mod tests {
         let intersections = vec![((1, 0.5), (3, 0.5))];
 
         path2.break_at_intersections(&intersections);
-        assert_eq!(path2.0.len(), path.0.len() + intersections.len() * 2);
+        assert_eq!(path2.0.len(), path.0.len() + intersections.len() * 4);
     }
 
     #[test]

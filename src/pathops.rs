@@ -246,10 +246,16 @@ mod tests {
         let mut path = BezPath::new();
         path.move_to((0., 0.));
         path.line_to((0., 1.));
-        path.curve_to((3., 2.), (-2., 2.), (1., 1.));
+        path.curve_to((2., 0.5), (-1., 0.5), (1., 1.));
         path.line_to((-0.5, 0.));
         path.close_path();
+        let mut path2 = path.clone();
         let intersects = path_self_intersections(&path, 0.);
-        assert_eq!(intersects.len(), 2);
+        path2.break_at_intersections(&intersects);
+        assert_eq!(intersects.len(), 4);
+        assert_eq!(
+            path2.elements().len(),
+            path.elements().len() + intersects.len() * 4,
+        );
     }
 }
