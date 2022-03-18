@@ -8,7 +8,7 @@ use std::ops::{Mul, Range};
 
 use arrayvec::ArrayVec;
 
-use crate::common::{solve_cubic, solve_linear, solve_quadratic};
+use crate::common::{solve_cubic, solve_quadratic};
 use crate::MAX_EXTREMA;
 use crate::{
     Affine, ConstPoint, CubicBez, Line, Nearest, ParamCurve, ParamCurveArclen, ParamCurveArea,
@@ -265,6 +265,28 @@ impl BezPath {
         segments(self.iter())
     }
 
+    /// Compute the winding number contribution and points of intersection of a single segment along a horizontal ray.
+    ///
+    /// Cast a ray to the left and record intersections.
+    pub fn winding_x_results(&self, p: Point) -> Vec<(f64, i32)> {
+        self.segments()
+            .into_iter()
+            .map(|seg| seg.winding_x_results(p))
+            .flatten()
+            .collect()
+    }
+
+    /// Compute the winding number contribution and points of intersection of a single segment along a vertical ray.
+    ///
+    /// Cast a ray to the upwards and record intersections.
+    pub fn winding_y_results(&self, p: Point) -> Vec<(f64, i32)> {
+        self.segments()
+            .into_iter()
+            .map(|seg| seg.winding_y_results(p))
+            .flatten()
+            .collect()
+    }
+
     /// Flatten the path, invoking the callback repeatedly.
     ///
     /// Flattening is the action of approximating a curve with a succession of line segments.
@@ -351,24 +373,54 @@ impl BezPath {
         if ix == 0 || ix >= self.0.len() {
             return None;
         }
-        let last = match self.0[ix - 1] {
-            PathEl::MoveTo(p) => p,
-            PathEl::LineTo(p) => p,
-            PathEl::QuadTo(_, p2) => p2,
-            PathEl::CurveTo(_, _, p3) => p3,
-            _ => return None,
+        let last = match self.0[ix - 1].end() {
+            Some(pt) => pt,
+            None => {
+                return None;
+            }
         };
         match self.0[ix] {
             PathEl::LineTo(p) => Some(PathSeg::Line(Line::new(last, p))),
             PathEl::QuadTo(p1, p2) => Some(PathSeg::Quad(QuadBez::new(last, p1, p2))),
             PathEl::CurveTo(p1, p2, p3) => Some(PathSeg::Cubic(CubicBez::new(last, p1, p2, p3))),
-            PathEl::ClosePath => self.0[..ix].iter().rev().find_map(|el| match *el {
-                PathEl::MoveTo(start) if start != last => {
-                    Some(PathSeg::Line(Line::new(last, start)))
+            PathEl::ClosePath => match self.get_seg_end(ix) {
+                Some(pt) => {
+                    if last != pt {
+                        Some(PathSeg::Line(Line::new(last, pt)))
+                    } else {
+                        None
+                    }
                 }
                 _ => None,
-            }),
+            },
             _ => None,
+        }
+    }
+
+    /// Get the end point of the segment if we can calculate it
+    ///
+    /// The element index counts [`PathEl`] elements, so
+    /// for example includes an initial `Moveto`.
+    pub fn get_seg_end(&self, ix: usize) -> Option<Point> {
+        if ix >= self.0.len() {
+            return None;
+        }
+
+        match self.0[ix] {
+            PathEl::MoveTo(p) => Some(p),
+            PathEl::LineTo(p) => Some(p),
+            PathEl::QuadTo(_, p) => Some(p),
+            PathEl::CurveTo(_, _, p) => Some(p),
+            PathEl::ClosePath => self.0[..ix].iter().rev().find_map(|el| match *el {
+                PathEl::MoveTo(p) => Some(p),
+                _ => {
+                    if !self.0.is_empty() {
+                        self.0[0].end()
+                    } else {
+                        None
+                    }
+                }
+            }),
         }
     }
 
@@ -420,17 +472,6 @@ impl BezPath {
             return; // No subpaths to close
         }
 
-        /// Gets the end point of an element
-        fn find_element_end(element: &PathEl) -> Point {
-            match element {
-                PathEl::MoveTo(p) => *p,
-                PathEl::LineTo(p) => *p,
-                PathEl::QuadTo(_, p) => *p,
-                PathEl::CurveTo(_, _, p) => *p,
-                _ => panic!("Can't get endpoint of a ClosePath in this function"),
-            }
-        }
-
         /// Gets the start of the subpath from the given element iterator
         fn find_subpath_start(path: &BezPath, index: usize) -> Point {
             match path.0[..index].iter().rev().find_map(|el| match *el {
@@ -441,7 +482,9 @@ impl BezPath {
                 None => {
                     // This can happen when the path doesn't start with a move-to like it should
                     match path.0.get(0) {
-                        Some(el) => find_element_end(el),
+                        Some(el) => el
+                            .end()
+                            .expect("Can't get end point of an element in this function!"),
                         _ => panic!("Path is empty when it shouldn't be!"),
                     }
                 }
@@ -471,7 +514,9 @@ impl BezPath {
                     i,
                     (
                         find_subpath_start(self, i),
-                        find_element_end(&self.0[i - 1]),
+                        self.0[i - 1]
+                            .end()
+                            .expect("Can't get end point of an element in this function!"),
                     ),
                 )
             })
@@ -878,13 +923,7 @@ impl<I: Iterator<Item = PathEl>> Iterator for Segments<I> {
             // We first need to check whether this is the first
             // path element we see to fill in the start position.
             let (start, last) = self.start_last.get_or_insert_with(|| {
-                let point = match el {
-                    PathEl::MoveTo(p) => p,
-                    PathEl::LineTo(p) => p,
-                    PathEl::QuadTo(_, p2) => p2,
-                    PathEl::CurveTo(_, _, p3) => p3,
-                    PathEl::ClosePath => panic!("Can't start a segment on a ClosePath"),
-                };
+                let point = el.end().expect("Can't start a segment on a ClosePath");
                 (point, point)
             });
 
@@ -1165,12 +1204,12 @@ impl PathSeg {
                 let a = end_perp - start_perp;
                 let b = start_par - end_par;
                 let c = a * start_par + b * start_perp;
-                if (a * p_par + b * p_perp - c) * (sign as f64) >= 0.0 {
+                if (a * p_par + b * p_perp - c) * (sign as f64) <= 0.0 {
                     let (c0, c1) = (c / a, -b / a);
                     if c0.is_infinite() || c1.is_infinite() {
                         return None;
                     }
-                    Some((solve_linear(c0, c1)[0], sign))
+                    Some((c0 + c1 * p_perp, sign))
                 } else {
                     None
                 }
@@ -1178,60 +1217,45 @@ impl PathSeg {
             PathSeg::Quad(quad) => {
                 let p1 = quad.p1;
                 let p1_par = convert(p1);
-                let p1_perp = convert_perp(p1);
 
                 if p_par < start_par.min(end_par).min(p1_par) {
                     return None;
                 }
 
                 // Quadratic equation
-                let a = end_perp - 2.0 * p1_perp + start_perp;
-                let b = 2.0 * (p1_perp - start_perp);
-                let c = start_perp - p_perp;
-                for t in solve_quadratic(c, b, a) {
-                    if (0.0..=1.0).contains(&t) {
-                        let x = convert(quad.eval(t));
-                        if p_par >= x {
-                            return Some((x, sign));
-                        } else {
-                            return None;
-                        }
-                    }
-                }
-
-                // No intersections with ray
-                None
+                let (a, b, c) = quad.parameters();
+                let roots = solve_quadratic(
+                    convert_perp(c.to_point()) - p_perp,
+                    convert_perp(b.to_point()),
+                    convert_perp(a.to_point()),
+                )
+                .into_iter()
+                .filter(|&t| (0.0..=1.0).contains(&t))
+                .collect::<Vec<_>>();
+                roots.get(0).map(|r| (convert(quad.eval(*r)), sign))
             }
             PathSeg::Cubic(cubic) => {
                 let p1 = cubic.p1;
                 let p2 = cubic.p2;
                 let p1_par = convert(p1);
-                let p1_perp = convert_perp(p1);
                 let p2_par = convert(p2);
-                let p2_perp = convert_perp(p2);
 
                 if p_par < start_par.min(end_par).min(p1_par).min(p2_par) {
                     return None;
                 }
 
                 // Cubic equation
-                let a = end_perp - 3.0 * p2_perp + 3.0 * p1_perp - start_perp;
-                let b = 3.0 * (p2_perp - 2.0 * p1_perp + start_perp);
-                let c = 3.0 * (p1_perp - start_perp);
-                let d = start_perp - p_perp;
-                for t in solve_cubic(d, c, b, a) {
-                    if (0.0..=1.0).contains(&t) {
-                        let x = convert(cubic.eval(t));
-                        if p_par >= x {
-                            return Some((x, sign));
-                        } else {
-                            return None;
-                        }
-                    }
-                }
-
-                // No intersections with ray
-                None
+                let (a, b, c, d) = cubic.parameters();
+                let roots = solve_cubic(
+                    convert_perp(d.to_point()) - p_perp,
+                    convert_perp(c.to_point()),
+                    convert_perp(b.to_point()),
+                    convert_perp(a.to_point()),
+                )
+                .into_iter()
+                .filter(|&t| (0.0..=1.0).contains(&t))
+                .collect::<Vec<_>>();
+                roots.get(0).map(|r| (convert(cubic.eval(*r)), sign))
             }
         }
     }
@@ -1249,7 +1273,7 @@ impl PathSeg {
     /// Compute the winding number contribution and points of intersection of a single segment along a horizontal ray.
     ///
     /// Cast a ray to the left and record intersections.
-    fn winding_x_results(&self, p: Point) -> Vec<(f64, i32)> {
+    pub fn winding_x_results(&self, p: Point) -> Vec<(f64, i32)> {
         self.extrema_ranges()
             .into_iter()
             .filter_map(|range| {
@@ -1262,7 +1286,7 @@ impl PathSeg {
     /// Compute the winding number contribution and points of intersection of a single segment along a vertical ray.
     ///
     /// Cast a ray to the upwards and record intersections.
-    fn winding_y_results(&self, p: Point) -> Vec<(f64, i32)> {
+    pub fn winding_y_results(&self, p: Point) -> Vec<(f64, i32)> {
         self.extrema_ranges()
             .into_iter()
             .filter_map(|range| {
@@ -1549,6 +1573,18 @@ impl PathEl {
             PathEl::QuadTo(p, p2) => p.is_nan() || p2.is_nan(),
             PathEl::CurveTo(p, p2, p3) => p.is_nan() || p2.is_nan() || p3.is_nan(),
             PathEl::ClosePath => false,
+        }
+    }
+
+    /// Returns the end point for the element if it can be determined
+    #[inline]
+    pub fn end(&self) -> Option<Point> {
+        match self {
+            PathEl::MoveTo(p) => Some(*p),
+            PathEl::LineTo(p) => Some(*p),
+            PathEl::QuadTo(_, p) => Some(*p),
+            PathEl::CurveTo(_, _, p) => Some(*p),
+            PathEl::ClosePath => None,
         }
     }
 }
