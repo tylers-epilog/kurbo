@@ -9,6 +9,9 @@ use std::ops::{Mul, Range};
 use arrayvec::ArrayVec;
 
 use crate::common::{solve_cubic, solve_quadratic};
+use crate::curve_intersections::{
+    curve_curve_intersections, domain_value_at_t, CurveIntersectionFlags,
+};
 use crate::MAX_EXTREMA;
 use crate::{
     Affine, ConstPoint, CubicBez, Line, Nearest, ParamCurve, ParamCurveArclen, ParamCurveArea,
@@ -528,9 +531,63 @@ impl BezPath {
             .for_each(|i| self.0.insert(*i, PathEl::ClosePath));
     }
 
-    /// Break paths segments at specified intersection points and snaps those points together
-    pub fn break_at_intersections(&mut self, intersections: &Vec<((usize, f64), (usize, f64))>) {
-        if self.0.is_empty() {
+    /// Gets the index and t-parameter of each segment in the path that intersects
+    /// with another segment in the path
+    pub fn self_intersections(&self, accuracy: f64) -> Vec<((usize, f64), (usize, f64))> {
+        let segments = self
+            .iter()
+            .enumerate()
+            .filter_map(|(index, _)| match self.get_seg(index) {
+                Some(seg) => Some((index, seg)),
+                None => None,
+            })
+            .collect::<Vec<_>>();
+
+        // Find self-intersecting segments
+        segments
+            .iter()
+            .by_ref()
+            .map(|&(index, seg)| {
+                seg.self_intersections(accuracy)
+                    .into_iter() // Get self-intersections for each segment
+                    .map(|intersect| ((index, intersect.0), (index, intersect.1)))
+                    .chain(
+                        segments
+                            .iter()
+                            .filter(|&(index2, _)| *index2 > index)
+                            .map(|&(index2, seg2)| {
+                                let flags = if index == 1 && index2 == self.0.len() - 1 {
+                                    // Don't capture the endpoint intersection caused by the paths being closed
+                                    CurveIntersectionFlags::KEEP_CURVE1_T1_INTERSECTION
+                                        | CurveIntersectionFlags::KEEP_CURVE2_T0_INTERSECTION
+                                } else if index2 == index + 1 {
+                                    // Don't capture the endpoint intersection caused by the segments being sequential
+                                    CurveIntersectionFlags::KEEP_CURVE1_T0_INTERSECTION
+                                        | CurveIntersectionFlags::KEEP_CURVE2_T1_INTERSECTION
+                                } else {
+                                    // Capture all endpoint intersections
+                                    CurveIntersectionFlags::KEEP_ALL_ENDPOINT_INTERSECTIONS
+                                };
+                                //curve_curve_intersections(&seg, &seg2, flags, accuracy).into_iter() // Get intersections with segments after this one
+                                curve_curve_intersections(&seg, &seg2, flags, accuracy)
+                                    .into_iter() // Get intersections with segments after this one
+                                    .map(|intersect| ((index, intersect.0), (index2, intersect.1)))
+                                    .collect::<Vec<_>>()
+                            })
+                            .flatten(),
+                    )
+                    .collect::<Vec<_>>()
+            })
+            .flatten()
+            .collect::<Vec<_>>()
+    }
+
+    /// Break paths segments at the specified self-intersection points by adding move-tos and snaps those points together
+    pub fn break_at_self_intersections(
+        path: &mut BezPath,
+        intersections: &Vec<((usize, f64), (usize, f64))>,
+    ) {
+        if path.0.is_empty() {
             return; // No path to break
         }
 
@@ -539,11 +596,11 @@ impl BezPath {
         }
 
         // Convert the list of elements into a vector of tuples to make tracking indices easier
-        let mut elements = self
+        let mut elements = path
             .elements()
             .iter()
             .enumerate()
-            .map(|(index, el)| (el, vec![(self.get_seg(index), (0.0..1.0))]))
+            .map(|(index, el)| (el, vec![(path.get_seg(index), (0.0..1.0))]))
             .collect::<Vec<_>>();
 
         // Split the segments at each intersection
@@ -622,7 +679,169 @@ impl BezPath {
             });
 
         // Create a new list of elements
-        self.0 = elements
+        path.0 = elements
+            .into_iter()
+            .map(|(el, segs)| {
+                // Convert list of segments into list of elements
+                match el {
+                    PathEl::MoveTo(_) => vec![*el], // No need to convert the element
+                    _ => {
+                        segs.iter()
+                            .filter_map(|(seg, _)| *seg) // Discard the range and unwrap the segments
+                            .map(|seg| {
+                                // Convert to path elements
+                                let el = match seg {
+                                    PathSeg::Line(line) => PathEl::LineTo(line.p1),
+                                    PathSeg::Quad(quad) => PathEl::QuadTo(quad.p1, quad.p2),
+                                    PathSeg::Cubic(cubic) => {
+                                        PathEl::CurveTo(cubic.p1, cubic.p2, cubic.p3)
+                                    }
+                                };
+                                vec![PathEl::MoveTo(seg.start()), el]
+                            })
+                            .flatten()
+                            .skip(1) // Skip the extra move-to added at the beginning
+                            .collect::<Vec<_>>()
+                    }
+                }
+            })
+            .flatten() // Flatten into one list of segments
+            .collect::<Vec<_>>();
+    }
+
+    /// Break paths segments at the specified intersection points by adding move-tos and snaps those points together
+    pub fn break_at_intersections(
+        path1: &mut BezPath,
+        path2: &mut BezPath,
+        intersections: &Vec<((usize, f64), (usize, f64))>,
+    ) {
+        if path1.0.is_empty() || path2.0.is_empty() {
+            return; // No paths to break
+        }
+
+        if intersections.is_empty() {
+            return; // No intersections to break at
+        }
+
+        // Convert the list of elements into a vector of tuples to make tracking indices easier
+        let mut elements1 = path1
+            .elements()
+            .iter()
+            .enumerate()
+            .map(|(index, el)| (el, vec![(path1.get_seg(index), (0.0..1.0))]))
+            .collect::<Vec<_>>();
+        let mut elements2 = path2
+            .elements()
+            .iter()
+            .enumerate()
+            .map(|(index, el)| (el, vec![(path2.get_seg(index), (0.0..1.0))]))
+            .collect::<Vec<_>>();
+
+        // Split the segments at each intersection
+        intersections
+            .iter()
+            .for_each(|&((index1, t1), (index2, t2))| {
+                fn find_segment_index(
+                    segs: &Vec<(Option<PathSeg>, Range<f64>)>,
+                    t: f64,
+                ) -> Option<(usize, (PathSeg, Range<f64>))> {
+                    // Find which range contains the t parameter
+                    segs.iter()
+                        .enumerate()
+                        .filter(|(_, (seg, _))| seg.is_some()) // Ignore elements that cannot be converted to segments
+                        .find(|(_, (_, range))| range.contains(&t)) // Search for the range containing t
+                        .map(|(index, (seg, range))| (index, (seg.unwrap(), range.clone())))
+                }
+
+                // Split segments at each intersection
+                fn modify_segment_list(
+                    segs: &mut Vec<(Option<PathSeg>, Range<f64>)>,
+                    t: f64,
+                ) -> usize {
+                    let (seg_index, (seg, range)) =
+                        find_segment_index(&segs, t).expect("Intersection segment not found!");
+                    let t_mapped = (t - range.start) / (range.end - range.start);
+
+                    // Replace segment with 2 subsegments
+                    segs.splice(
+                        seg_index..(seg_index + 1),
+                        vec![
+                            (Some(seg.subsegment(0.0..t_mapped)), (range.start..t)),
+                            (Some(seg.subsegment(t_mapped..1.0)), (t..range.end)),
+                        ],
+                    );
+
+                    seg_index
+                }
+                let seg_index1 = modify_segment_list(
+                    &mut elements1
+                        .get_mut(index1)
+                        .expect("Intersection index out of range!")
+                        .1,
+                    t1,
+                );
+                let seg_index2 = modify_segment_list(
+                    &mut elements2
+                        .get_mut(index2)
+                        .expect("Intersection index out of range!")
+                        .1,
+                    t2,
+                );
+
+                // If we are splitting the same segment, and t2 < t1, seg_index1 needs to be adjusted
+                let seg_index1 = if index1 == index2 && t2 < t1 {
+                    seg_index1 + 1
+                } else {
+                    seg_index1
+                };
+
+                // Snap intersection points to be exactly the same
+                let pt_snap = ((elements1[index1].1[seg_index1].0.unwrap().end().to_vec2()
+                    + elements2[index2].1[seg_index2].0.unwrap().end().to_vec2())
+                    / 2.)
+                    .to_point();
+                elements1[index1].1[seg_index1].0.unwrap().set_end(pt_snap);
+                elements1[index1].1[seg_index1 + 1]
+                    .0
+                    .unwrap()
+                    .set_start(pt_snap);
+                elements2[index2].1[seg_index2].0.unwrap().set_end(pt_snap);
+                elements2[index2].1[seg_index2 + 1]
+                    .0
+                    .unwrap()
+                    .set_start(pt_snap);
+            });
+
+        // Create a new list of elements
+        path1.0 = elements1
+            .into_iter()
+            .map(|(el, segs)| {
+                // Convert list of segments into list of elements
+                match el {
+                    PathEl::MoveTo(_) => vec![*el], // No need to convert the element
+                    _ => {
+                        segs.iter()
+                            .filter_map(|(seg, _)| *seg) // Discard the range and unwrap the segments
+                            .map(|seg| {
+                                // Convert to path elements
+                                let el = match seg {
+                                    PathSeg::Line(line) => PathEl::LineTo(line.p1),
+                                    PathSeg::Quad(quad) => PathEl::QuadTo(quad.p1, quad.p2),
+                                    PathSeg::Cubic(cubic) => {
+                                        PathEl::CurveTo(cubic.p1, cubic.p2, cubic.p3)
+                                    }
+                                };
+                                vec![PathEl::MoveTo(seg.start()), el]
+                            })
+                            .flatten()
+                            .skip(1) // Skip the extra move-to added at the beginning
+                            .collect::<Vec<_>>()
+                    }
+                }
+            })
+            .flatten() // Flatten into one list of segments
+            .collect::<Vec<_>>();
+        path2.0 = elements2
             .into_iter()
             .map(|(el, segs)| {
                 // Convert list of segments into list of elements
@@ -1395,6 +1614,61 @@ impl PathSeg {
         result
     }
 
+    /// Gets possible self intersections for a given path segment, ignoring the end
+    /// points
+    fn self_intersections(&self, accuracy: f64) -> ArrayVec<(f64, f64), 9> {
+        match self {
+            PathSeg::Cubic(bez) => {
+                if Point::is_near(bez.p0, bez.p3, accuracy) {
+                    // Only the endpoints intersect, which we will ignore
+                    return ArrayVec::<(f64, f64), 9>::new();
+                }
+
+                // I'll make the argument (based on experiemntation) that if we
+                // take any cubic bezier where the start and end points are
+                // horizontal to each other, and split it at the maximum y
+                // posiiton, the two halves will intersect IFF the cibic bezier
+                // curve is self-intersecting.
+
+                // The first step in finding this split point is to transform the
+                // bezier curve so that start/end points are horizontal.
+                let bez_uv = bez.transform_to_uv();
+
+                // Then find the t-value of the largest peak
+                let extrema_y = bez_uv.extrema_y();
+                let max_peak = extrema_y.iter().fold(0., |acc, t| {
+                    let pt_acc = bez_uv.eval(acc);
+                    let pt_t = bez_uv.eval(*t);
+                    if pt_t.y.abs() > pt_acc.y.abs() {
+                        *t
+                    } else {
+                        acc
+                    }
+                });
+
+                // Split the original bezier at the location of the peak
+                let (domain1, domain2) = &(0.0..max_peak, max_peak..1.0);
+                let (curve1, curve2) = (
+                    bez.subsegment(domain1.clone()),
+                    bez.subsegment(domain2.clone()),
+                );
+
+                // Return the intersections of the two curves, not including end-points
+                curve_curve_intersections(&curve1, &curve2, CurveIntersectionFlags::NONE, accuracy)
+                    .into_iter()
+                    .map(|(t1, t2)| {
+                        (
+                            domain_value_at_t(domain1, t1),
+                            domain_value_at_t(domain2, t2),
+                        )
+                    })
+                    .collect::<ArrayVec<_, 9>>()
+            }
+            // No other segment type can self intersect
+            _ => ArrayVec::<(f64, f64), 9>::new(),
+        }
+    }
+
     /// Is this Bezier path finite?
     #[inline]
     pub fn is_finite(&self) -> bool {
@@ -1775,18 +2049,36 @@ mod tests {
     }
 
     #[test]
-    fn test_break_at_intersections() {
+    fn test_break_at_self_intersections() {
         let mut path = BezPath::new();
         path.move_to((0.0, 0.0));
         path.line_to((1.0, 1.0));
         path.line_to((0.0, 1.0));
         path.line_to((1.0, 1.0));
 
-        let mut path2 = path.clone();
         let intersections = vec![((1, 0.5), (3, 0.5))];
 
-        path2.break_at_intersections(&intersections);
+        let mut path2 = path.clone();
+        BezPath::break_at_self_intersections(&mut path2, &intersections);
         assert_eq!(path2.0.len(), path.0.len() + intersections.len() * 4);
+    }
+
+    #[test]
+    fn test_break_at_intersections() {
+        let mut path = BezPath::new();
+        path.move_to((0.0, 0.0));
+        path.line_to((1.0, 0.0));
+        path.line_to((1.0, 1.0));
+        path.line_to((0.0, 1.0));
+        path.close_path();
+
+        let mut path1 = path.clone();
+        let mut path2 = Affine::translate((0.5, 0.5)) * path.clone();
+
+        let intersections = vec![((2, 0.5), (1, 0.5)), ((3, 0.5), (4, 0.5))];
+        BezPath::break_at_intersections(&mut path1, &mut path2, &intersections);
+        assert_eq!(path1.0.len(), path.0.len() + intersections.len() * 2);
+        assert_eq!(path2.0.len(), path1.0.len());
     }
 
     #[test]
@@ -1850,5 +2142,26 @@ mod tests {
             .map_while(|i| circle.get_seg(i))
             .collect::<Vec<_>>();
         assert_eq!(segments, get_segs);
+    }
+
+    #[test]
+    fn test_self_intersections() {
+        let mut path = BezPath::new();
+        path.move_to((0., 0.));
+        path.line_to((0., 1.));
+        path.curve_to((2., 0.5), (-1., 0.5), (1., 1.));
+        path.line_to((-0.5, 0.));
+        path.close_path();
+
+        let intersects = path.self_intersections(0.);
+
+        let mut path2 = path.clone();
+        BezPath::break_at_self_intersections(&mut path2, &intersects);
+
+        assert_eq!(intersects.len(), 4);
+        assert_eq!(
+            path2.elements().len(),
+            path.elements().len() + intersects.len() * 4
+        );
     }
 }

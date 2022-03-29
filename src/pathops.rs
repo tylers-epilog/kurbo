@@ -4,9 +4,7 @@
 /// https://losingfight.com/blog/2011/07/07/how-to-implement-boolean-operations-on-bezier-paths-part-1/
 /// https://losingfight.com/blog/2011/07/08/how-to-implement-boolean-operations-on-bezier-paths-part-2/
 /// https://losingfight.com/blog/2011/07/09/how-to-implement-boolean-operations-on-bezier-paths-part-3/
-use crate::curve_intersections::*;
-use crate::{BezPath, ParamCurve, ParamCurveExtrema, PathSeg, Point, Rect, Shape};
-use arrayvec::ArrayVec;
+use crate::{BezPath, Point, Rect, Shape};
 
 /// An operation that can be performed on a path
 #[derive(Clone, Debug, PartialEq)]
@@ -104,122 +102,20 @@ pub fn path_path_operation(path_a: &BezPath, operation: PathOperation) -> BezPat
     }
 }
 
-/// Gets possible self intersections for a given path segment, ignoring the end
-/// points
-fn segment_self_intersections(segment: &PathSeg, accuracy: f64) -> ArrayVec<(f64, f64), 9> {
-    match segment {
-        PathSeg::Cubic(bez) => {
-            if Point::is_near(bez.p0, bez.p3, accuracy) {
-                // Only the endpoints intersect, which we will ignore
-                return ArrayVec::<(f64, f64), 9>::new();
-            }
-
-            // I'll make the argument (based on experiemntation) that if we
-            // take any cubic bezier where the start and end points are
-            // horizontal to each other, and split it at the maximum y
-            // posiiton, the two halves will intersect IFF the cibic bezier
-            // curve is self-intersecting.
-
-            // The first step in finding this split point is to transform the
-            // bezier curve so that start/end points are horizontal.
-            let bez_uv = bez.transform_to_uv();
-
-            // Then find the t-value of the largest peak
-            let extrema_y = bez_uv.extrema_y();
-            let max_peak = extrema_y.iter().fold(0., |acc, t| {
-                let pt_acc = bez_uv.eval(acc);
-                let pt_t = bez_uv.eval(*t);
-                if pt_t.y.abs() > pt_acc.y.abs() {
-                    *t
-                } else {
-                    acc
-                }
-            });
-
-            // Split the original bezier at the location of the peak
-            let (domain1, domain2) = &(0.0..max_peak, max_peak..1.0);
-            let (curve1, curve2) = (
-                bez.subsegment(domain1.clone()),
-                bez.subsegment(domain2.clone()),
-            );
-
-            // Return the intersections of the two curves, not including end-points
-            curve_curve_intersections(&curve1, &curve2, CurveIntersectionFlags::NONE, accuracy)
-                .into_iter()
-                .map(|(t1, t2)| {
-                    (
-                        domain_value_at_t(domain1, t1),
-                        domain_value_at_t(domain2, t2),
-                    )
-                })
-                .collect::<ArrayVec<_, 9>>()
-        }
-        // No other segment type can self intersect
-        _ => ArrayVec::<(f64, f64), 9>::new(),
-    }
-}
-
-/// Gets the index and t-parameter of each segment in the path that intersects
-/// with another segment in the path
-fn path_self_intersections(path: &BezPath, accuracy: f64) -> Vec<((usize, f64), (usize, f64))> {
-    let segments = path
-        .iter()
-        .enumerate()
-        .filter_map(|(index, _)| match path.get_seg(index) {
-            Some(seg) => Some((index, seg)),
-            None => None,
-        })
-        .collect::<Vec<_>>();
-
-    // Find self-intersecting segments
-    segments
-        .iter()
-        .by_ref()
-        .map(|&(index, seg)| {
-            segment_self_intersections(&seg, accuracy)
-                .into_iter() // Get self-intersections for each segment
-                .map(|intersect| ((index, intersect.0), (index, intersect.1)))
-                .chain(
-                    segments
-                        .iter()
-                        .filter(|&(index2, _)| *index2 > index)
-                        .map(|&(index2, seg2)| {
-                            let flags = if index == 1 && index2 == path.elements().len() - 1 {
-                                // Don't capture the endpoint intersection caused by the paths being closed
-                                CurveIntersectionFlags::KEEP_CURVE1_T1_INTERSECTION
-                                    | CurveIntersectionFlags::KEEP_CURVE2_T0_INTERSECTION
-                            } else if index2 == index + 1 {
-                                // Don't capture the endpoint intersection caused by the segments being sequential
-                                CurveIntersectionFlags::KEEP_CURVE1_T0_INTERSECTION
-                                    | CurveIntersectionFlags::KEEP_CURVE2_T1_INTERSECTION
-                            } else {
-                                // Capture all endpoint intersections
-                                CurveIntersectionFlags::KEEP_ALL_ENDPOINT_INTERSECTIONS
-                            };
-                            curve_curve_intersections(&seg, &seg2, flags, accuracy)
-                                .into_iter() // Get intersections with segments after this one
-                                .map(|intersect| ((index, intersect.0), (index2, intersect.1)))
-                                .collect::<Vec<_>>()
-                        })
-                        .flatten(),
-                )
-                .collect::<Vec<_>>()
-        })
-        .flatten()
-        .collect::<Vec<_>>()
-}
-
 /// This function converts a winding-fill path into an even-odd filled path
 /// Note: Since there is no winding fill property of path, the path is assumed
 /// to have a winding fill when this function is called
 /// Note: Open paths are closed
-pub fn convert_path_to_even_odd(path: &mut BezPath, accuracy: f64) {
+pub fn convert_path_to_even_odd(path: &BezPath, accuracy: f64) -> BezPath {
+    // Make a copy of the path
+    let mut path = path.clone();
+
     // Close all subpaths because this path is treated as being closed anyways
     path.close_subpaths();
 
     // Break apart at self intersections
-    let intersects = path_self_intersections(&path, accuracy);
-    path.break_at_intersections(&intersects);
+    let intersects = path.self_intersections(accuracy);
+    BezPath::break_at_self_intersections(&mut path, &intersects);
     let paths = path.split_at_moves();
 
     // Convert the list of elements into a vector of tuples to make tracking elements easier
@@ -343,7 +239,7 @@ pub fn convert_path_to_even_odd(path: &mut BezPath, accuracy: f64) {
         .flatten()
         .collect::<Vec<_>>();
 
-    *path = BezPath::from_vec(elements);
+    BezPath::from_vec(elements)
 }
 
 /// Performs an operation on the current path
@@ -354,6 +250,20 @@ fn do_path_op(
     closed_flags: ClosedPathOperationsFlags,
     connect_nearby_paths: bool,
 ) -> BezPath {
+    // Make copies of the paths
+    let mut path_a = path_a.clone();
+    let mut path_b = path_b.clone();
+
+    if connect_nearby_paths {
+        // We treat all paths as if they are closed, so we'll just go ahead and
+        // close the paths
+        path_a.close_subpaths();
+        path_b.close_subpaths();
+    }
+
+    // Find all intersections between the two paths
+    // let intersections = path_path_intersections(&path_a, &path_b);
+
     // @TODO DO THIS
     // @TODO CLOSE OPEN PATHS
     path_a.clone() // TEMPORARY CODE
@@ -374,24 +284,6 @@ mod tests {
     }
 
     #[test]
-    fn test_self_intersections() {
-        let mut path = BezPath::new();
-        path.move_to((0., 0.));
-        path.line_to((0., 1.));
-        path.curve_to((2., 0.5), (-1., 0.5), (1., 1.));
-        path.line_to((-0.5, 0.));
-        path.close_path();
-        let mut path2 = path.clone();
-        let intersects = path_self_intersections(&path, 0.);
-        path2.break_at_intersections(&intersects);
-        assert_eq!(intersects.len(), 4);
-        assert_eq!(
-            path2.elements().len(),
-            path.elements().len() + intersects.len() * 4,
-        );
-    }
-
-    #[test]
     fn test_convert_to_even_odd() {
         let mut path = BezPath::new();
         path.move_to((0., 0.));
@@ -400,8 +292,7 @@ mod tests {
         path.line_to((-0.5, 0.));
         path.close_path();
 
-        let mut path2 = path.clone();
-        convert_path_to_even_odd(&mut path2, 0.);
+        let path2 = convert_path_to_even_odd(&path, 0.);
 
         assert_eq!(path2.elements().len(), 10);
     }
