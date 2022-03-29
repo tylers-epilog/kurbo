@@ -114,8 +114,7 @@ pub fn convert_path_to_even_odd(path: &BezPath, accuracy: f64) -> BezPath {
     path.close_subpaths();
 
     // Break apart at self intersections
-    let intersects = path.self_intersections(accuracy);
-    BezPath::break_at_self_intersections(&mut path, &intersects);
+    BezPath::break_at_self_intersections(&mut path, accuracy);
     let paths = path.split_at_moves();
 
     // Convert the list of elements into a vector of tuples to make tracking elements easier

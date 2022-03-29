@@ -583,14 +583,12 @@ impl BezPath {
     }
 
     /// Break paths segments at the specified self-intersection points by adding move-tos and snaps those points together
-    pub fn break_at_self_intersections(
-        path: &mut BezPath,
-        intersections: &Vec<((usize, f64), (usize, f64))>,
-    ) {
+    pub fn break_at_self_intersections(path: &mut BezPath, accuracy: f64) {
         if path.0.is_empty() {
             return; // No path to break
         }
 
+        let intersections = path.self_intersections(accuracy);
         if intersections.is_empty() {
             return; // No intersections to break at
         }
@@ -2049,21 +2047,6 @@ mod tests {
     }
 
     #[test]
-    fn test_break_at_self_intersections() {
-        let mut path = BezPath::new();
-        path.move_to((0.0, 0.0));
-        path.line_to((1.0, 1.0));
-        path.line_to((0.0, 1.0));
-        path.line_to((1.0, 1.0));
-
-        let intersections = vec![((1, 0.5), (3, 0.5))];
-
-        let mut path2 = path.clone();
-        BezPath::break_at_self_intersections(&mut path2, &intersections);
-        assert_eq!(path2.0.len(), path.0.len() + intersections.len() * 4);
-    }
-
-    #[test]
     fn test_break_at_intersections() {
         let mut path = BezPath::new();
         path.move_to((0.0, 0.0));
@@ -2154,9 +2137,8 @@ mod tests {
         path.close_path();
 
         let intersects = path.self_intersections(0.);
-
         let mut path2 = path.clone();
-        BezPath::break_at_self_intersections(&mut path2, &intersects);
+        BezPath::break_at_self_intersections(&mut path2, 0.);
 
         assert_eq!(intersects.len(), 4);
         assert_eq!(
