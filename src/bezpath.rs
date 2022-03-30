@@ -532,7 +532,7 @@ impl BezPath {
     }
 
     /// Gets the index and t-parameter of each segment in the path that intersects
-    /// with another segment in the path
+    /// with itself or another segment in the path
     pub fn self_intersections(&self, accuracy: f64) -> Vec<((usize, f64), (usize, f64))> {
         let segments = self
             .iter()
@@ -582,6 +582,89 @@ impl BezPath {
             .collect::<Vec<_>>()
     }
 
+    // Gets the index and t-parameter of each segment in the path that intersects
+    /// with itself or another segment in the path
+    pub fn intersections(
+        &self,
+        other: &BezPath,
+        accuracy: f64,
+    ) -> Vec<((usize, f64), (usize, f64))> {
+        let segments1 = self
+            .iter()
+            .enumerate()
+            .filter_map(|(index, _)| match self.get_seg(index) {
+                Some(seg) => Some((index, seg)),
+                None => None,
+            })
+            .collect::<Vec<_>>();
+
+        let segments2 = other
+            .iter()
+            .enumerate()
+            .filter_map(|(index, _)| match other.get_seg(index) {
+                Some(seg) => Some((index, seg)),
+                None => None,
+            })
+            .collect::<Vec<_>>();
+
+        // Find segments that intersect
+        segments1
+            .iter()
+            .by_ref()
+            .map(|&(index1, seg1)| {
+                segments2
+                    .iter()
+                    .by_ref()
+                    .map(|&(index2, seg2)| {
+                        // Get intersections with segments after this one
+                        curve_curve_intersections(
+                            &seg1,
+                            &seg2,
+                            CurveIntersectionFlags::KEEP_T1_ENDPOINT_INTERSECTIONS,
+                            accuracy,
+                        )
+                        .into_iter()
+                        .map(|intersect| ((index1, intersect.0), (index2, intersect.1)))
+                        .collect::<Vec<_>>()
+                    })
+                    .flatten()
+                    .collect::<Vec<_>>()
+            })
+            .flatten()
+            .collect::<Vec<_>>()
+    }
+
+    /// Finds the location of a segment in a list of segments, used in modify_segment_list
+    fn find_segment_index(
+        segs: &Vec<(Option<PathSeg>, Range<f64>)>,
+        t: f64,
+    ) -> Option<(usize, (PathSeg, Range<f64>))> {
+        // Find which range contains the t parameter
+        segs.iter()
+            .enumerate()
+            .filter(|(_, (seg, _))| seg.is_some()) // Ignore elements that cannot be converted to segments
+            .find(|(_, (_, range))| range.contains(&t)) // Search for the range containing t
+            .map(|(index, (seg, range))| (index, (seg.unwrap(), range.clone())))
+    }
+
+    /// Modifies a list of segments, used in break_at_self_intersections and break_at_intersections
+    fn modify_segment_list(segs: &mut Vec<(Option<PathSeg>, Range<f64>)>, t: f64) -> usize {
+        let (seg_index, (seg, range)) =
+            BezPath::find_segment_index(&segs, t).expect("Intersection segment not found!");
+        let t_mapped = (t - range.start) / (range.end - range.start);
+
+        // Replace segment with 2 subsegments
+        segs.splice(
+            seg_index..(seg_index + 1),
+            vec![
+                (Some(seg.subsegment(0.0..t_mapped)), (range.start..t)),
+                (Some(seg.subsegment(t_mapped..1.0)), (t..range.end)),
+            ],
+        );
+
+        seg_index
+    }
+
     /// Break paths segments at the specified self-intersection points by adding move-tos and snaps those points together
     pub fn break_at_self_intersections(path: &mut BezPath, accuracy: f64) {
         if path.0.is_empty() {
@@ -605,46 +688,15 @@ impl BezPath {
         intersections
             .iter()
             .for_each(|&((index1, t1), (index2, t2))| {
-                fn find_segment_index(
-                    segs: &Vec<(Option<PathSeg>, Range<f64>)>,
-                    t: f64,
-                ) -> Option<(usize, (PathSeg, Range<f64>))> {
-                    // Find which range contains the t parameter
-                    segs.iter()
-                        .enumerate()
-                        .filter(|(_, (seg, _))| seg.is_some()) // Ignore elements that cannot be converted to segments
-                        .find(|(_, (_, range))| range.contains(&t)) // Search for the range containing t
-                        .map(|(index, (seg, range))| (index, (seg.unwrap(), range.clone())))
-                }
-
                 // Split segments at each intersection
-                fn modify_segment_list(
-                    segs: &mut Vec<(Option<PathSeg>, Range<f64>)>,
-                    t: f64,
-                ) -> usize {
-                    let (seg_index, (seg, range)) =
-                        find_segment_index(&segs, t).expect("Intersection segment not found!");
-                    let t_mapped = (t - range.start) / (range.end - range.start);
-
-                    // Replace segment with 2 subsegments
-                    segs.splice(
-                        seg_index..(seg_index + 1),
-                        vec![
-                            (Some(seg.subsegment(0.0..t_mapped)), (range.start..t)),
-                            (Some(seg.subsegment(t_mapped..1.0)), (t..range.end)),
-                        ],
-                    );
-
-                    seg_index
-                }
-                let seg_index1 = modify_segment_list(
+                let seg_index1 = BezPath::modify_segment_list(
                     &mut elements
                         .get_mut(index1)
                         .expect("Intersection index out of range!")
                         .1,
                     t1,
                 );
-                let seg_index2 = modify_segment_list(
+                let seg_index2 = BezPath::modify_segment_list(
                     &mut elements
                         .get_mut(index2)
                         .expect("Intersection index out of range!")
@@ -708,15 +760,12 @@ impl BezPath {
     }
 
     /// Break paths segments at the specified intersection points by adding move-tos and snaps those points together
-    pub fn break_at_intersections(
-        path1: &mut BezPath,
-        path2: &mut BezPath,
-        intersections: &Vec<((usize, f64), (usize, f64))>,
-    ) {
+    pub fn break_at_intersections(path1: &mut BezPath, path2: &mut BezPath, accuracy: f64) {
         if path1.0.is_empty() || path2.0.is_empty() {
             return; // No paths to break
         }
 
+        let intersections = path1.intersections(path2, accuracy);
         if intersections.is_empty() {
             return; // No intersections to break at
         }
@@ -739,46 +788,15 @@ impl BezPath {
         intersections
             .iter()
             .for_each(|&((index1, t1), (index2, t2))| {
-                fn find_segment_index(
-                    segs: &Vec<(Option<PathSeg>, Range<f64>)>,
-                    t: f64,
-                ) -> Option<(usize, (PathSeg, Range<f64>))> {
-                    // Find which range contains the t parameter
-                    segs.iter()
-                        .enumerate()
-                        .filter(|(_, (seg, _))| seg.is_some()) // Ignore elements that cannot be converted to segments
-                        .find(|(_, (_, range))| range.contains(&t)) // Search for the range containing t
-                        .map(|(index, (seg, range))| (index, (seg.unwrap(), range.clone())))
-                }
-
                 // Split segments at each intersection
-                fn modify_segment_list(
-                    segs: &mut Vec<(Option<PathSeg>, Range<f64>)>,
-                    t: f64,
-                ) -> usize {
-                    let (seg_index, (seg, range)) =
-                        find_segment_index(&segs, t).expect("Intersection segment not found!");
-                    let t_mapped = (t - range.start) / (range.end - range.start);
-
-                    // Replace segment with 2 subsegments
-                    segs.splice(
-                        seg_index..(seg_index + 1),
-                        vec![
-                            (Some(seg.subsegment(0.0..t_mapped)), (range.start..t)),
-                            (Some(seg.subsegment(t_mapped..1.0)), (t..range.end)),
-                        ],
-                    );
-
-                    seg_index
-                }
-                let seg_index1 = modify_segment_list(
+                let seg_index1 = BezPath::modify_segment_list(
                     &mut elements1
                         .get_mut(index1)
                         .expect("Intersection index out of range!")
                         .1,
                     t1,
                 );
-                let seg_index2 = modify_segment_list(
+                let seg_index2 = BezPath::modify_segment_list(
                     &mut elements2
                         .get_mut(index2)
                         .expect("Intersection index out of range!")
@@ -2047,6 +2065,26 @@ mod tests {
     }
 
     #[test]
+    fn test_break_at_self_intersections() {
+        let mut path = BezPath::new();
+        path.move_to((0., 0.));
+        path.line_to((0., 1.));
+        path.curve_to((2., 0.5), (-1., 0.5), (1., 1.));
+        path.line_to((-0.5, 0.));
+        path.close_path();
+
+        let intersects = path.self_intersections(0.);
+        let mut path2 = path.clone();
+        BezPath::break_at_self_intersections(&mut path2, 0.);
+
+        assert_eq!(intersects.len(), 4);
+        assert_eq!(
+            path2.elements().len(),
+            path.elements().len() + intersects.len() * 4
+        );
+    }
+
+    #[test]
     fn test_break_at_intersections() {
         let mut path = BezPath::new();
         path.move_to((0.0, 0.0));
@@ -2058,9 +2096,11 @@ mod tests {
         let mut path1 = path.clone();
         let mut path2 = Affine::translate((0.5, 0.5)) * path.clone();
 
-        let intersections = vec![((2, 0.5), (1, 0.5)), ((3, 0.5), (4, 0.5))];
-        BezPath::break_at_intersections(&mut path1, &mut path2, &intersections);
-        assert_eq!(path1.0.len(), path.0.len() + intersections.len() * 2);
+        let intersects = path1.intersections(&path2, 0.);
+        BezPath::break_at_intersections(&mut path1, &mut path2, 0.);
+
+        assert_eq!(intersects.len(), 2);
+        assert_eq!(path1.0.len(), path.0.len() + intersects.len() * 2);
         assert_eq!(path2.0.len(), path1.0.len());
     }
 
@@ -2125,25 +2165,5 @@ mod tests {
             .map_while(|i| circle.get_seg(i))
             .collect::<Vec<_>>();
         assert_eq!(segments, get_segs);
-    }
-
-    #[test]
-    fn test_self_intersections() {
-        let mut path = BezPath::new();
-        path.move_to((0., 0.));
-        path.line_to((0., 1.));
-        path.curve_to((2., 0.5), (-1., 0.5), (1., 1.));
-        path.line_to((-0.5, 0.));
-        path.close_path();
-
-        let intersects = path.self_intersections(0.);
-        let mut path2 = path.clone();
-        BezPath::break_at_self_intersections(&mut path2, 0.);
-
-        assert_eq!(intersects.len(), 4);
-        assert_eq!(
-            path2.elements().len(),
-            path.elements().len() + intersects.len() * 4
-        );
     }
 }

@@ -62,7 +62,7 @@ pub fn path_path_operation(path_a: &BezPath, operation: PathOperation) -> BezPat
             )
         }
         PathOperation::Intersect(path_b) => {
-            // Get the intersectionf of a and b
+            // Get the intersections of a and b
             do_path_op(
                 path_a,
                 path_b,

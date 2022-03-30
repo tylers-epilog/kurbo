@@ -295,6 +295,10 @@ bitflags::bitflags! {
         const KEEP_CURVE1_T1_INTERSECTION           = 0b00000010;
         const KEEP_CURVE2_T0_INTERSECTION           = 0b00000100;
         const KEEP_CURVE2_T1_INTERSECTION           = 0b00001000;
+        const KEEP_T0_ENDPOINT_INTERSECTIONS        = Self::KEEP_CURVE1_T0_INTERSECTION.bits
+                                                    | Self::KEEP_CURVE2_T0_INTERSECTION.bits;
+        const KEEP_T1_ENDPOINT_INTERSECTIONS        = Self::KEEP_CURVE1_T1_INTERSECTION.bits
+                                                    | Self::KEEP_CURVE2_T1_INTERSECTION.bits;
         const KEEP_CURVE1_ENDPOINT_INTERSECTIONS    = Self::KEEP_CURVE1_T0_INTERSECTION.bits
                                                     | Self::KEEP_CURVE1_T1_INTERSECTION.bits;
         const KEEP_CURVE2_ENDPOINT_INTERSECTIONS    = Self::KEEP_CURVE2_T0_INTERSECTION.bits
