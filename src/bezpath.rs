@@ -290,6 +290,49 @@ impl BezPath {
             .collect()
     }
 
+    /// Returns a new `BezPath` describing the same path as `self`, but with
+    /// the points reversed.
+    pub fn reverse(&self) -> BezPath {
+        if self.0.is_empty() {
+            return self.clone();
+        }
+
+        let elements = vec![PathEl::MoveTo(
+            self.get_seg_end(self.0.len() - 1)
+                .expect("Unable to get path end to reverse path"),
+        )]
+        .into_iter()
+        .chain(
+            self.0
+                .iter()
+                .enumerate()
+                .scan(Point::new(0., 0.), |start, (index, el)| {
+                    let seg = self.get_seg(index).map(|seg| seg.reverse());
+                    let res = (*start, seg);
+                    *start = match el {
+                        PathEl::MoveTo(p) => *p,
+                        _ => seg.map(|s| s.start()).unwrap_or(*start), // Use start because seg is reversed
+                    };
+                    Some(res)
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
+                .skip(1)
+                .rev()
+                .map(|(start, seg_option)| match seg_option {
+                    Some(seg) => match seg {
+                        PathSeg::Line(_) => PathEl::LineTo(start),
+                        PathSeg::Quad(quad) => PathEl::QuadTo(quad.p1, start),
+                        PathSeg::Cubic(cubic) => PathEl::CurveTo(cubic.p1, cubic.p2, start),
+                    },
+                    _ => PathEl::MoveTo(start),
+                }),
+        )
+        .collect::<Vec<_>>();
+
+        BezPath::from_vec(elements)
+    }
+
     /// Flatten the path, invoking the callback repeatedly.
     ///
     /// Flattening is the action of approximating a curve with a succession of line segments.
@@ -648,21 +691,63 @@ impl BezPath {
     }
 
     /// Modifies a list of segments, used in break_at_self_intersections and break_at_intersections
-    fn modify_segment_list(segs: &mut Vec<(Option<PathSeg>, Range<f64>)>, t: f64) -> usize {
+    fn modify_segment_list(
+        segs: &mut Vec<(Option<PathSeg>, Range<f64>)>,
+        t: f64,
+    ) -> (usize, (bool, bool), Point) {
         let (seg_index, (seg, range)) =
             BezPath::find_segment_index(&segs, t).expect("Intersection segment not found!");
         let t_mapped = (t - range.start) / (range.end - range.start);
 
+        let pt = seg.eval(t_mapped);
+
         // Replace segment with 2 subsegments
         segs.splice(
             seg_index..(seg_index + 1),
-            vec![
-                (Some(seg.subsegment(0.0..t_mapped)), (range.start..t)),
-                (Some(seg.subsegment(t_mapped..1.0)), (t..range.end)),
-            ],
+            if t_mapped == 0.0 {
+                vec![(Some(seg.subsegment(t_mapped..1.0)), (t..range.end))]
+            } else if t_mapped == 1.0 {
+                vec![(Some(seg.subsegment(0.0..t_mapped)), (range.start..t))]
+            } else {
+                vec![
+                    (Some(seg.subsegment(0.0..t_mapped)), (range.start..t)),
+                    (Some(seg.subsegment(t_mapped..1.0)), (t..range.end)),
+                ]
+            },
         );
 
-        seg_index
+        (seg_index, (t_mapped != 0.0, t_mapped != 1.0), pt)
+    }
+
+    fn get_snap_point(
+        sub_start_good1: bool,
+        sub_end_good1: bool,
+        seg_pt1: Point,
+        sub_start_good2: bool,
+        sub_end_good2: bool,
+        seg_pt2: Point,
+    ) -> Point {
+        if sub_start_good1 && sub_end_good1 && sub_start_good2 && sub_end_good2 {
+            // Both segments were split somewhere in the middle, so use the
+            // average of the two locations
+            ((seg_pt1.to_vec2() + seg_pt2.to_vec2()) / 2.).to_point()
+        } else if sub_start_good1 && sub_end_good1 {
+            // seg1 was split but not seg2
+            // In order to prevent creating a gap between the end of one
+            // segment and the start of the next, we'll use the endpoint
+            // of seg2
+            seg_pt2
+        } else if sub_start_good2 && sub_end_good2 {
+            // seg2 was split but not seg1
+            // In order to prevent creating a gap between the end of one
+            // segment and the start of the next, we'll use the endpoint
+            // of seg1
+            seg_pt1
+        } else {
+            // Bot segments intersected at endpoints. I suppose we just use the
+            // average here and hope for the best.
+            ((seg_pt1.to_vec2() + seg_pt2.to_vec2()) / 2.).to_point()
+        }
     }
 
     /// Break paths segments at the specified self-intersection points by adding move-tos and snaps those points together
@@ -689,43 +774,56 @@ impl BezPath {
             .iter()
             .for_each(|&((index1, t1), (index2, t2))| {
                 // Split segments at each intersection
-                let seg_index1 = BezPath::modify_segment_list(
-                    &mut elements
-                        .get_mut(index1)
-                        .expect("Intersection index out of range!")
-                        .1,
-                    t1,
-                );
-                let seg_index2 = BezPath::modify_segment_list(
-                    &mut elements
-                        .get_mut(index2)
-                        .expect("Intersection index out of range!")
-                        .1,
-                    t2,
-                );
+                let (mut seg_index1, (sub_start_good1, sub_end_good1), seg_pt1) =
+                    BezPath::modify_segment_list(
+                        &mut elements
+                            .get_mut(index1)
+                            .expect("Intersection index out of range!")
+                            .1,
+                        t1,
+                    );
+                let (seg_index2, (sub_start_good2, sub_end_good2), seg_pt2) =
+                    BezPath::modify_segment_list(
+                        &mut elements
+                            .get_mut(index2)
+                            .expect("Intersection index out of range!")
+                            .1,
+                        t2,
+                    );
 
-                // If we are splitting the same segment, and t2 < t1, seg_index1 needs to be adjusted
-                let seg_index1 = if index1 == index2 && t2 < t1 {
-                    seg_index1 + 1
-                } else {
-                    seg_index1
-                };
+                // Check if both segments were split
+                if sub_start_good1 && sub_end_good1 && sub_start_good2 && sub_end_good2 {
+                    // If we are splitting the same segment, and t2 < t1, seg_index1 needs to be adjusted
+                    seg_index1 = if index1 == index2 && t2 < t1 {
+                        seg_index1 + 1
+                    } else {
+                        seg_index1
+                    };
+                }
 
                 // Snap intersection points to be exactly the same
-                let pt_snap = ((elements[index1].1[seg_index1].0.unwrap().end().to_vec2()
-                    + elements[index2].1[seg_index2].0.unwrap().end().to_vec2())
-                    / 2.)
-                    .to_point();
-                elements[index1].1[seg_index1].0.unwrap().set_end(pt_snap);
-                elements[index1].1[seg_index1 + 1]
-                    .0
-                    .unwrap()
-                    .set_start(pt_snap);
-                elements[index2].1[seg_index2].0.unwrap().set_end(pt_snap);
-                elements[index2].1[seg_index2 + 1]
-                    .0
-                    .unwrap()
-                    .set_start(pt_snap);
+                let pt_snap = BezPath::get_snap_point(
+                    sub_start_good1,
+                    sub_end_good1,
+                    seg_pt1,
+                    sub_start_good2,
+                    sub_end_good2,
+                    seg_pt2,
+                );
+                if sub_start_good1 && sub_end_good1 {
+                    elements[index1].1[seg_index1].0.unwrap().set_end(pt_snap);
+                    elements[index1].1[seg_index1 + 1]
+                        .0
+                        .unwrap()
+                        .set_start(pt_snap);
+                }
+                if sub_start_good2 && sub_end_good2 {
+                    elements[index2].1[seg_index2].0.unwrap().set_end(pt_snap);
+                    elements[index2].1[seg_index2 + 1]
+                        .0
+                        .unwrap()
+                        .set_start(pt_snap);
+                }
             });
 
         // Create a new list of elements
@@ -789,43 +887,46 @@ impl BezPath {
             .iter()
             .for_each(|&((index1, t1), (index2, t2))| {
                 // Split segments at each intersection
-                let seg_index1 = BezPath::modify_segment_list(
-                    &mut elements1
-                        .get_mut(index1)
-                        .expect("Intersection index out of range!")
-                        .1,
-                    t1,
-                );
-                let seg_index2 = BezPath::modify_segment_list(
-                    &mut elements2
-                        .get_mut(index2)
-                        .expect("Intersection index out of range!")
-                        .1,
-                    t2,
-                );
-
-                // If we are splitting the same segment, and t2 < t1, seg_index1 needs to be adjusted
-                let seg_index1 = if index1 == index2 && t2 < t1 {
-                    seg_index1 + 1
-                } else {
-                    seg_index1
-                };
+                let (seg_index1, (sub_start_good1, sub_end_good1), seg_pt1) =
+                    BezPath::modify_segment_list(
+                        &mut elements1
+                            .get_mut(index1)
+                            .expect("Intersection index out of range!")
+                            .1,
+                        t1,
+                    );
+                let (seg_index2, (sub_start_good2, sub_end_good2), seg_pt2) =
+                    BezPath::modify_segment_list(
+                        &mut elements2
+                            .get_mut(index2)
+                            .expect("Intersection index out of range!")
+                            .1,
+                        t2,
+                    );
 
                 // Snap intersection points to be exactly the same
-                let pt_snap = ((elements1[index1].1[seg_index1].0.unwrap().end().to_vec2()
-                    + elements2[index2].1[seg_index2].0.unwrap().end().to_vec2())
-                    / 2.)
-                    .to_point();
-                elements1[index1].1[seg_index1].0.unwrap().set_end(pt_snap);
-                elements1[index1].1[seg_index1 + 1]
-                    .0
-                    .unwrap()
-                    .set_start(pt_snap);
-                elements2[index2].1[seg_index2].0.unwrap().set_end(pt_snap);
-                elements2[index2].1[seg_index2 + 1]
-                    .0
-                    .unwrap()
-                    .set_start(pt_snap);
+                let pt_snap = BezPath::get_snap_point(
+                    sub_start_good1,
+                    sub_end_good1,
+                    seg_pt1,
+                    sub_start_good2,
+                    sub_end_good2,
+                    seg_pt2,
+                );
+                if sub_start_good1 && sub_end_good1 {
+                    elements1[index1].1[seg_index1].0.unwrap().set_end(pt_snap);
+                    elements1[index1].1[seg_index1 + 1]
+                        .0
+                        .unwrap()
+                        .set_start(pt_snap);
+                }
+                if sub_start_good2 && sub_end_good2 {
+                    elements2[index2].1[seg_index2].0.unwrap().set_end(pt_snap);
+                    elements2[index2].1[seg_index2 + 1]
+                        .0
+                        .unwrap()
+                        .set_start(pt_snap);
+                }
             });
 
         // Create a new list of elements
@@ -2022,6 +2123,25 @@ mod tests {
         path.quad_to((5.0, 5.0), (10.0, 10.0));
         path.line_to((15.0, 15.0));
         path.close_path();
+    }
+
+    #[test]
+    fn test_path_reverse() {
+        let mut path = BezPath::new();
+        path.move_to((10.0, 10.0));
+        path.line_to((20.0, 20.0));
+
+        let path_rev = path.reverse();
+
+        assert_eq!(path.elements().len(), path_rev.elements().len());
+        assert_eq!(
+            path.get_seg_end(0),
+            path_rev.get_seg_end(path_rev.elements().len() - 1)
+        );
+        assert_eq!(
+            path.get_seg_end(path_rev.elements().len() - 1),
+            path_rev.get_seg_end(0)
+        );
     }
 
     #[test]
