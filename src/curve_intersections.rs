@@ -785,7 +785,7 @@ fn add_point_curve_intersection<T: ParamCurveBezierClipping, U: ParamCurveBezier
 
     // Generally speaking |curve| will be quite small at this point, so see if we can get away with
     // just finding one of the points along the curve (even though there may be multiple).
-    let results = t_along_curve_for_point(pt, curves.1, accuracy, false);
+    let results = t_along_curve_for_point(pt, curves.1, accuracy, true);
     let curve_t = results
         .iter()
         .fold((-1., f64::MAX), |(t, d_sq), result| {
@@ -843,7 +843,7 @@ pub fn t_along_curve_for_point<T: ParamCurveBezierClipping>(
         for t in params {
             let t = *t;
 
-            if near_pts_only && !Point::is_near(pt, curve.eval(t), 1e-3) {
+            if near_pts_only && !Point::is_near(pt, curve.eval(t), accuracy) {
                 continue;
             }
 
