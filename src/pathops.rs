@@ -1,9 +1,11 @@
-/// Boolean operations on BezPaths
-///
-/// The methodology approximately follows that which is described here:
-/// https://losingfight.com/blog/2011/07/07/how-to-implement-boolean-operations-on-bezier-paths-part-1/
-/// https://losingfight.com/blog/2011/07/08/how-to-implement-boolean-operations-on-bezier-paths-part-2/
-/// https://losingfight.com/blog/2011/07/09/how-to-implement-boolean-operations-on-bezier-paths-part-3/
+//! Boolean operations on BezPaths
+//!
+//! The methodology approximately follows that which is described here:
+//! https://losingfight.com/blog/2011/07/07/how-to-implement-boolean-operations-on-bezier-paths-part-1/
+//! https://losingfight.com/blog/2011/07/08/how-to-implement-boolean-operations-on-bezier-paths-part-2/
+//! https://losingfight.com/blog/2011/07/09/how-to-implement-boolean-operations-on-bezier-paths-part-3/
+//!
+//! Caution: All functions in this file are provisional and may change in the future!
 use crate::{BezPath, PathEl, Point, Rect, Shape};
 
 /// An operation that can be performed on a path
