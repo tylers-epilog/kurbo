@@ -42,7 +42,11 @@ bitflags::bitflags! {
 }
 
 /// Compute an operation between two paths
-pub fn path_path_operation(path_a: &BezPath, operation: PathOperation) -> BezPath {
+pub fn path_path_operation(
+    path_a: &BezPath,
+    operation: PathOperation,
+    accuracy: f64,
+) -> BezPath {
     match operation {
         PathOperation::Subtract(path_b) => {
             // Subtract b from a
@@ -52,7 +56,7 @@ pub fn path_path_operation(path_a: &BezPath, operation: PathOperation) -> BezPat
                 ClosedPathOperationsFlags::KEEP_A_OUTSIDE_B
                     | ClosedPathOperationsFlags::KEEP_B_INSIDE_A,
                 true,
-                0.,
+                accuracy,
             )
         }
         PathOperation::Outside(path_b) => {
@@ -62,7 +66,7 @@ pub fn path_path_operation(path_a: &BezPath, operation: PathOperation) -> BezPat
                 path_b,
                 ClosedPathOperationsFlags::KEEP_A_OUTSIDE_B,
                 false,
-                0.,
+                accuracy,
             )
         }
         PathOperation::Intersect(path_b) => {
@@ -73,7 +77,7 @@ pub fn path_path_operation(path_a: &BezPath, operation: PathOperation) -> BezPat
                 ClosedPathOperationsFlags::KEEP_A_INSIDE_B
                     | ClosedPathOperationsFlags::KEEP_B_INSIDE_A,
                 true,
-                0.,
+                accuracy,
             )
         }
         PathOperation::Inside(path_b) => {
@@ -83,7 +87,7 @@ pub fn path_path_operation(path_a: &BezPath, operation: PathOperation) -> BezPat
                 path_b,
                 ClosedPathOperationsFlags::KEEP_A_INSIDE_B,
                 false,
-                0.,
+                accuracy,
             )
         }
         PathOperation::UniteWith(path_b) => {
@@ -94,7 +98,7 @@ pub fn path_path_operation(path_a: &BezPath, operation: PathOperation) -> BezPat
                 ClosedPathOperationsFlags::KEEP_A_OUTSIDE_B
                     | ClosedPathOperationsFlags::KEEP_B_OUTSIDE_A,
                 true,
-                0.,
+                accuracy,
             )
         }
         PathOperation::Xor(path_b) => {
@@ -440,7 +444,11 @@ mod tests {
     fn test_circle_unite_circle() {
         let c1 = Circle::new((0., 0.), 10.).to_path(1e-3);
         let c2 = Circle::new((5., 0.), 10.).to_path(1e-3);
-        let res = path_path_operation(&c1, PathOperation::UniteWith(&c2));
+        let res = path_path_operation(
+            &c1,
+            PathOperation::UniteWith(&c2),
+            0.,
+        );
 
         assert_eq!(res.elements().len(), 8);
     }
